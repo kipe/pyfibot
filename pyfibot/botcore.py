@@ -11,6 +11,7 @@ $Id$
 $HeadURL$
 """
 
+from __future__ import print_function, division
 # twisted imports
 from twisted.words.protocols import irc
 from twisted.internet import reactor, threads
@@ -167,7 +168,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
     """PyFiBot"""
 
     nickname = "pyfibot"
-    realname = "http://code.google.com/p/pyfibot/"
+    realname = "https://github.com/lepinkainen/pyfibot"
     password = None
 
     # send 1 msg per second max
@@ -210,6 +211,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
 
     def signedOn(self):
         """Called when bot has succesfully signed on to server."""
+        log.info("Signed on to network")
         # QuakeNet specific auth and IP-address masking
         # TODO: Alias could be case-sensitive
         if self.network.alias == "quakenet":

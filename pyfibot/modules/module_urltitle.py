@@ -8,6 +8,7 @@ $Id$
 $HeadURL$
 """
 
+from __future__ import unicode_literals, print_function, division
 import fnmatch
 import urlparse
 import logging
@@ -15,7 +16,7 @@ import re
 import requests
 
 has_json = True
-# import py2.6 json if available, fall back to simplejson
+# import py2.6+ json if available, fall back to simplejson
 try:
     import json
 except:
@@ -81,6 +82,7 @@ def handle_url(bot, user, channel, url, msg):
                 # handler found, abort
                 return _title(bot, channel, title, True)
 
+    # Fall back to generic handler
     bs = getUrl(url).getBS()
     if not bs:
         log.debug("No BS available, returning")
@@ -107,7 +109,7 @@ def handle_url(bot, user, channel, url, msg):
             return
 
         if _check_redundant(url, title):
-            log.debug("Redundant title, not displaying")
+            log.debug("%s is redundant, not displaying" % title)
             return
 
         ignored_titles = ['404 Not Found', '403 Forbidden']
@@ -520,6 +522,7 @@ def _handle_aamulehti(url):
 def _handle_apina(url):
     """http://apina.biz/*"""
     return None
+
 
 def _handle_areena(url):
     """http://areena.yle.fi/*"""

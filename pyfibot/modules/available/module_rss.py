@@ -10,6 +10,7 @@ $Id$
 $HeadURL$
 """
 
+from __future__ import unicode_literals, print_function, division
 import sys
 import os
 import re
@@ -433,7 +434,7 @@ def rotator_indexfeeds(bot, delay):
         if (empty_database > 0):
             indexfeeds_callLater = reactor.callLater(delay, rotator_indexfeeds, bot, delay)
     except Exception, e:
-        print e
+        print(e)
 
 
 def rotator_output(bot, delay):
@@ -448,4 +449,4 @@ def rotator_output(bot, delay):
         if (empty_database > 0):
             output_callLater = reactor.callLater(delay, rotator_output, bot, delay)
     except Exception, e:
-        print e
+        print(e)
