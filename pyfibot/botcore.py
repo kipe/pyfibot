@@ -248,7 +248,6 @@ class PyFiBot(irc.IRCClient, CoreCommands):
         message = message.encode("UTF-8")
 
         # Change nick!user@host -> nick, since all servers don't support full hostmask messaging
-        message = message.encode('utf-8')
         if "!" and "@" in channel:
             channel = self.factory.getNick(channel)
 
