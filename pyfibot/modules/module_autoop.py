@@ -96,7 +96,7 @@ def handle_userJoined(bot, user, channel):
 def command_autoop(bot, user, channel, args):
     args = args.split()
     if len(args) == 0:
-        return bot.say(channel, 'Invalid command, valid commands are %s' % ', '.join(map(str, COMMANDS)))
+        return bot.say(channel, 'Valid commands are %s' % ', '.join(map(str, COMMANDS)))
     command = args[0]
     if command not in COMMANDS:
         return bot.say(channel, 'Invalid command, valid commands are %s' % ', '.join(map(str, COMMANDS)))
