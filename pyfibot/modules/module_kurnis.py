@@ -45,7 +45,7 @@ def make_dict(source):
         food = tmp_food.split('</small></b><br />')[1].split('<br /><i><small>')[0]
 
         name = p.sub('', name).strip()
-        food = p.sub('', food).strip()
+        food = p.sub('', food).strip().strip('¤')
         foods[name] = food
     return foods
 
