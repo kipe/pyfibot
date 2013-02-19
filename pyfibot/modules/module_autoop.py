@@ -85,7 +85,7 @@ def check_hostmask(hostmask):
 def op_user(bot, user, channel):
     nick = getNick(user)
     bot.log('auto-opping %s on %s' % (user, channel))
-    bot.mode(channel, True, 'o', user=nick)
+    bot.mode(channel.encode('utf-8'), True, 'o'.encode('utf-8'), user=nick.encode('utf-8'))
 
 
 def handle_userJoined(bot, user, channel):
