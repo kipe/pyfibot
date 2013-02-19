@@ -220,23 +220,25 @@ class PyFiBotFactory(ThrottledClientFactory):
         g['isAdmin'] = self.isAdmin
         return g
 
-    def getUrl(self, url, nocache=False):
+    def getUrl(self, url, nocache=False, params=None, headers=None):
         """Gets data, bs and headers for the given url, using the internal cache if necessary"""
-        # http://docs.python-requests.org/en/latest/api/#configurations
-        # pool_maxsize
-        # pool_connections
 
+        # TODO: Make this configurable in the config
         browser = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.95 Safari/537.11"
-        # Give this session object to all requests or something?
+
+        # Common session for all requests
         s = requests.session()
         s.verify = False
         s.stream = True  # Don't fetch content unless asked
         s.headers.update({'User-Agent':browser})
+        # Custom headers from requester
+        if headers:
+            s.headers.update(headers)
 
-        r = s.get(url)
+        r = s.get(url, params=params)
 
         size = int(r.headers.get('Content-Length', 0)) / 1024
-        log.debug("Content-Length: %dkB" % size)
+        #log.debug("Content-Length: %dkB" % size)
         if size > 2048:
             log.warn("Content too large, will not fetch: %s %s" % (size, url))
             r.close()
@@ -260,23 +262,28 @@ class PyFiBotFactory(ThrottledClientFactory):
         return False
 
 
-def init_logging():
+def init_logging(config):
     filename = os.path.join(sys.path[0], 'pyfibot.log')
+
     # get root logger
     logger = logging.getLogger()
+
     if False:
         handler = logging.handlers.RotatingFileHandler(filename, maxBytes=5000 * 1024, backupCount=20)
     else:
         handler = logging.StreamHandler()
-    # time format is same format of strftime
+
     formatter = logging.Formatter('%(asctime)-15s %(levelname)-8s %(name)-11s %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)
+
+    if config['debug']:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
 
 
 def main():
-    init_logging()
     sys.path.append(os.path.join(sys.path[0], 'lib'))
     #config = os.path.join(sys.path[0], "config.yml")
     config = sys.argv[1]
@@ -286,6 +293,8 @@ def main():
     else:
         print("No config file found, please edit example.yml and rename it to config.yml")
         sys.exit(1)
+
+    init_logging(config.get('logging',{}))
 
     factory = PyFiBotFactory(config)
     for network, settings in config['networks'].items():
