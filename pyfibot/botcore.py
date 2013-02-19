@@ -247,7 +247,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
         """Override default say to make replying to private messages easier"""
 
         # Encode outgoing message to UTF-8 if it's unicode
-        if isinstance(message, unicode):
+        if not isinstance(message, str):
             message = message.encode("UTF-8")
 
         # Change nick!user@host -> nick, since all servers don't support full hostmask messaging
