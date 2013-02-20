@@ -20,6 +20,8 @@ import requests
 import fnmatch
 import logging
 import logging.handlers
+import json
+import jsonschema
 
 try:
     import yaml
@@ -237,11 +239,10 @@ class PyFiBotFactory(ThrottledClientFactory):
 
         r = s.get(url, params=params)
 
-        size = int(r.headers.get('Content-Length', 0)) / 1024
+        size = int(r.headers.get('Content-Length', 0)) // 1024
         #log.debug("Content-Length: %dkB" % size)
         if size > 2048:
-            log.warn("Content too large, will not fetch: %s %s" % (size, url))
-            r.close()
+            log.warn("Content too large, will not fetch: %skB %s" % (size, url))
             return None
 
         return r
@@ -277,22 +278,29 @@ def init_logging(config):
     handler.setFormatter(formatter)
     logger.addHandler(handler)
 
-    if config['debug']:
+    if config.get('debug', False):
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.INFO)
 
 
+def validate_config(config, schema):
+    print("Validating configuration")
+    jsonschema.validate(config, schema)
+
+
 def main():
     sys.path.append(os.path.join(sys.path[0], 'lib'))
-    #config = os.path.join(sys.path[0], "config.yml")
-    config = sys.argv[1]
+    schema = json.load(file(os.path.join(sys.path[0], "config_schema.json")))
+    config = sys.argv[1] or os.path.join(sys.path[0], "config.yml")
 
     if os.path.exists(config):
         config = yaml.load(file(config))
     else:
         print("No config file found, please edit example.yml and rename it to config.yml")
         sys.exit(1)
+
+    validate_config(config, schema)
 
     init_logging(config.get('logging',{}))
 

@@ -253,8 +253,9 @@ class PyFiBot(irc.IRCClient, CoreCommands):
     def say(self, channel, message, length=None):
         """Override default say to make replying to private messages easier"""
 
-        # Encode outgoing message to UTF-8 if it's unicode
-        if not isinstance(message, str):
+        # Encode all outgoing messages to UTF-8
+        if isinstance(message, unicode):
+            log.debug("Converting message to UTF-8")
             message = message.encode("UTF-8")
 
         # Change nick!user@host -> nick, since all servers don't support full hostmask messaging
@@ -270,6 +271,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
                 m = "..." + m
             self.msg(channel, m, length)
             cont = True
+
         return ('botcore.say', channel, message)
 
     def log(self, message):
