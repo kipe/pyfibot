@@ -286,7 +286,7 @@ def init_logging(config):
 
 def validate_config(config, schema):
     print("Validating configuration")
-    jsonschema.validate(config, schema)
+    #jsonschema.validate(config, schema)
 
 
 def main():
