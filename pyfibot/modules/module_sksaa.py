@@ -12,7 +12,7 @@ def init(bot):
     global token
     global url
     config = bot.config.get("module_sksaa", {})
-    userid = config.get("user", "")
+    userid = config.get("userid", "")
     token = config.get("token", "")
     url = config.get("url", "")
 
