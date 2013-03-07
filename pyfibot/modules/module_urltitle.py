@@ -27,12 +27,17 @@ except:
 
 from types import TupleType
 
-from BeautifulSoup import BeautifulSoup
-from BeautifulSoup import BeautifulStoneSoup
+from repoze.lru import ExpiringLRUCache
+
+from bs4 import BeautifulSoup
 
 log = logging.getLogger("urltitle")
 config = None
 bot = None
+
+# Caching for url titles
+cache_timeout = 300  # 300 second timeout for cache
+cache = ExpiringLRUCache(10, cache_timeout)
 
 
 def init(botref):
@@ -91,14 +96,21 @@ def handle_url(bot, user, channel, url, msg):
     # this can manage twitter + gawker sites for now
     url = url.replace("#!", "?_escaped_fragment_=")
 
-    handlers = [(h, ref) for h, ref in globals().items() if h.startswith("_handle_")]
+    # Check if the url already has a title cached
+    title = cache.get(url)
+    if title:
+        log.debug("Cache hit")
+        return _title(bot, channel, title, True)
 
     # try to find a specific handler for the URL
+    handlers = [(h, ref) for h, ref in globals().items() if h.startswith("_handle_")]
+
     for handler, ref in handlers:
         pattern = ref.__doc__.split()[0]
         if fnmatch.fnmatch(url, pattern):
             title = ref(url)
             if title:
+                cache.put(url, title)
                 # handler found, abort
                 return _title(bot, channel, title, True)
 
@@ -108,7 +120,7 @@ def handle_url(bot, user, channel, url, msg):
         log.debug("No BS available, returning")
         return
 
-    title = bs.first('title')
+    title = bs.find('title')
     # no title attribute
     if not title:
         log.debug("No title found, returning")
@@ -127,6 +139,9 @@ def handle_url(bot, user, channel, url, msg):
         # nothing left in title (only spaces, newlines and linefeeds)
         if not title:
             return
+
+        # Cache generic titles
+        cache.put(url, title)
 
         if config.get("check_redundant", True) and _check_redundant(url, title):
             log.debug("%s is redundant, not displaying" % title)
@@ -217,8 +232,6 @@ def _title(bot, channel, title, smart=False, prefix=None):
     if len(title) > 200:
         title = title[:200] + "..."
 
-    title = BeautifulStoneSoup(title, convertEntities=BeautifulStoneSoup.ALL_ENTITIES)
-
     if not info:
         return bot.say(channel, "%s %s" % (prefix, title))
     else:
@@ -232,7 +245,7 @@ def _handle_iltalehti(url):
     bs = __get_bs(url)
     if not bs:
         return
-    title = bs.first('title').string
+    title = bs.find('title').string
     # The first part is the actual story title, lose the rest
     title = title.split("|")[0].strip()
     return title
@@ -252,7 +265,7 @@ def _handle_keskisuomalainen_sahke(url):
     bs = __get_bs(url)
     if not bs:
         return
-    title = bs.first('p', {'class': 'jotsikko'})
+    title = bs.find('p', {'class': 'jotsikko'})
     if title:
         title = title.next.strip()
         return title
@@ -261,8 +274,8 @@ def _handle_keskisuomalainen_sahke(url):
 def _handle_tietokone(url):
     """http://www.tietokone.fi/uutta/uutinen.asp?news_id=*"""
     bs = __get_bs(url)
-    sub = bs.first('h5').string
-    main = bs.first('h2').string
+    sub = bs.find('h5').string
+    main = bs.find('h2').string
     return "%s - %s" % (main, sub)
 
 
@@ -271,7 +284,7 @@ def _handle_itviikko(url):
     bs = __get_bs(url)
     if not bs:
         return
-    return bs.first("h1", "headline").string
+    return bs.find("h1", "headline").string
 
 
 def _handle_verkkokauppa(url):
@@ -279,14 +292,14 @@ def _handle_verkkokauppa(url):
     bs = __get_bs(url)
     if not bs:
         return
-    product = bs.first('h1', id='productName').string
+    product = bs.find('h1', id='productName').string
     try:
-        price = bs.first('strong', {'class': 'product-price-label'}).next.next.next
+        price = bs.find('strong', {'class': 'product-price-label'}).next.next.next
         price = price.getText().replace('&nbsp;', '')
     except:
         price = "???€"
     try:
-        availability = bs.first('div', {'id': 'productAvailabilityInfo'}).firstText().getText()
+        availability = bs.find('div', {'id': 'productAvailabilityInfo'}).firstText().getText()
     except:
         availability = ""
     return "%s | %s (%s)" % (product, price, availability)
@@ -297,7 +310,7 @@ def _handle_mol(url):
     bs = __get_bs(url)
     if not bs:
         return
-    title = bs.first("div", {'class': 'otsikko'}).string
+    title = bs.find("div", {'class': 'otsikko'}).string
     return title
 
 
@@ -327,8 +340,8 @@ def _handle_tweet(url):
 def _handle_netanttila(url):
     """http://www.netanttila.com/webapp/wcs/stores/servlet/ProductDisplay*"""
     bs = __get_bs(url)
-    itemname = bs.first("h1").string.replace("\n", "").replace("\r", "").replace("\t", "").strip()
-    price = bs.first("td", {'class': 'right highlight'}).string.split(" ")[0]
+    itemname = bs.find("h1").string.replace("\n", "").replace("\r", "").replace("\t", "").strip()
+    price = bs.find("td", {'class': 'right highlight'}).string.split(" ")[0]
     return "%s | %s EUR" % (itemname, price)
 
 
@@ -409,9 +422,9 @@ def _handle_ircquotes(url):
     bs = __get_bs(url)
     if not bs:
         return
-    chan = bs.first("span", {'class': 'quotetitle'}).next.next.string
-    points = bs.first("span", {'class': 'points'}).next.string
-    firstline = bs.first("div", {'class': 'quote'}).next.string
+    chan = bs.find("span", {'class': 'quotetitle'}).next.next.string
+    points = bs.find("span", {'class': 'points'}).next.string
+    firstline = bs.find("div", {'class': 'quote'}).next.string
     title = "%s (%s): %s" % (chan, points, firstline)
     return title
 
@@ -487,7 +500,7 @@ def _handle_hs(url):
         from datetime import datetime
         # handle updated news items of format, and get the latest update stamp
         # 20.7.2010 8:02 | PÃ¤ivitetty: 20.7.2010 12:53
-        date = bs.first('p', {'class': 'date'}).next
+        date = bs.find('p', {'class': 'date'}).next
         # in case hs.fi changes the date format, don't crash on it
         if date:
             date = date.split("|")[0].strip()
@@ -508,7 +521,7 @@ def _handle_hs(url):
 def _handle_mtv3(url):
     """*mtv3.fi*"""
     bs = __get_bs(url)
-    title = bs.first("h1", "entry-title").text
+    title = bs.find("h1", "entry-title").text
     return title
 
 
@@ -525,7 +538,7 @@ def _handle_yle(url):
 def _handle_varttifi(url):
     """http://www.vartti.fi/artikkeli/*"""
     bs = __get_bs(url)
-    title = bs.first("h2").string
+    title = bs.find("h2").string
     return title
 
 
@@ -534,7 +547,7 @@ def _handle_aamulehti(url):
     bs = __get_bs(url)
     if not bs:
         return
-    title = bs.fetch("h1")[0].string
+    title = bs.find("h1").string
     return title
 
 
@@ -553,16 +566,25 @@ def _handle_areena(url):
 def _handle_imgur(url):
     """http://*imgur.com*"""
     client_id = "a7a5d6bc929d48f"
-    endpoint = "https://api.imgur.com/3/"
+    api = "https://api.imgur.com/3/"
     headers = {"Authorization": "Client-ID %s" % client_id}
 
-    match = re.match(".*i.imgur.com/(.*)\.jpg", url)
-    if match:
-        image_id = match.group(1)
-    else:
+    # regexes and matching API endpoints
+    endpoints = {"i.imgur.com/(.*)\.jpg": "image",
+                 "imgur.com/gallery/(.*)": "image",
+                 "imgur.com/a/(.*)": "album"}
+
+    endpoint = None
+    for regex, _endpoint in endpoints.items():
+        match = re.search(regex, url)
+        if match:
+            resource_id = match.group(1)
+            endpoint = _endpoint
+
+    if not endpoint:
         return
 
-    r = get_url("%simage/%s" % (endpoint, image_id), headers=headers)
+    r = get_url("%s/%s/%s" % (api, endpoint, resource_id), headers=headers)
     title = r.json()['data']['title']
 
     return title
