@@ -13,9 +13,9 @@ threshold = 120
 def init(bot):
     global default_location
     global threshold
-    config = bot.config.get("module_openweather", {})
-    default_location = config.get("default_location", "Helsinki")
-    threshold = int(config.get("threshold", 120))  # threshold to show measuring time in minutes
+    config = bot.config.get('module_openweather', {})
+    default_location = config.get('default_location', 'Helsinki')
+    threshold = int(config.get('threshold', 120))  # threshold to show measuring time in minutes
     log.info('Using %s as default location' % default_location)
 
 
