@@ -82,3 +82,7 @@ def command_weather(bot, user, channel, args):
         text += ', cloudiness: %d%%' % cloudiness
 
     return bot.say(channel, text)
+
+
+def command_saa(bot, user, channel, args):
+    return command_weather(bot, user, channel, args)
