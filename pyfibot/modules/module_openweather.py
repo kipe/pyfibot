@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 from __future__ import unicode_literals, print_function, division
-import requests
 import logging
 from datetime import datetime, timedelta
 
@@ -8,13 +7,16 @@ from datetime import datetime, timedelta
 log = logging.getLogger('openweather')
 url = 'http://openweathermap.org/data/2.1/find/name?q=%s'
 
+default_location = 'Helsinki'
+threshold = 120
+
 
 def init(bot):
     global default_location
     global threshold
-    config = bot.config.get("module_openweather", {})
-    default_location = config.get("default_location", "Helsinki")
-    threshold = int(config.get("threshold", 120))  # threshold to show measuring time in minutes
+    config = bot.config.get('module_openweather', {})
+    default_location = config.get('default_location', 'Helsinki')
+    threshold = int(config.get('threshold', 120))  # threshold to show measuring time in minutes
     log.info('Using %s as default location' % default_location)
 
 
@@ -69,5 +71,8 @@ def command_weather(bot, user, channel, args):
                 return bot.say(channel, text.encode('utf-8'))
             else:
                 return bot.say(channel, 'Error: No data.')
-    else:
-        return bot.say(channel, 'Error: Location not found.')
+    return bot.say(channel, 'Error: Location not found.')
+
+
+def command_saa(bot, user, channel, args):
+    return command_weather(bot, user, channel, args)
