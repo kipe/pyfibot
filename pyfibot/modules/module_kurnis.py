@@ -67,4 +67,5 @@ def command_kurnis(bot, user, channel, args):
     text = make_text(data)
     if not text:
         return bot.say(channel, 'Ei ruokalistaa tälle päivälle')
+    text = text.rstrip(' |')
     return bot.say(channel, text)
