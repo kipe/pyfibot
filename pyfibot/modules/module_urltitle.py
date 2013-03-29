@@ -10,6 +10,7 @@ import fnmatch
 import urlparse
 import logging
 import re
+from datetime import datetime
 
 has_json = True
 # import py2.6+ json if available, fall back to simplejson
@@ -32,6 +33,8 @@ log = logging.getLogger("urltitle")
 config = None
 bot = None
 
+TITLE_LAG_MAXIMUM = 10
+
 # Caching for url titles
 cache_timeout = 300  # 300 second timeout for cache
 cache = ExpiringLRUCache(10, cache_timeout)
@@ -45,8 +48,17 @@ def init(botref):
 
 
 def __get_bs(url):
+    # Fetch the content and measure how long it took
+    start = datetime.now()
     r = bot.get_url(url)
+    end = datetime.now()
+
     if not r:
+        return None
+
+    duration = (end-start).seconds
+    if duration > TITLE_LAG_MAXIMUM:
+        log.error("Fetching title took %d seconds, not displaying title" % duration)
         return None
 
     content_type = r.headers['content-type'].split(';')[0]
@@ -326,12 +338,17 @@ def _handle_tweet(url):
 
     data = get_url(infourl)
 
-    #reads dict
-    ##You can modify the fields below or add any fields you want to the returned string
     text = data.json()['text']
     user = data.json()['user']['screen_name']
     name = data.json()['user']['name']
-    tweet = "Tweet by %s(@%s): %s" % (name, user, text)
+
+    retweets  = data.json()['retweet_count']
+    favorites = data.json()['favorite_count']
+    created   = data.json()['created_at']
+    created_date = datetime.strptime(created, "%a %b %d %H:%M:%S +0000 %Y")
+    tweet_age = datetime.now()-created_date
+
+    tweet = "@%s (%s): %s" % (user, name, text)
     return tweet
 
 
@@ -371,8 +388,10 @@ def _handle_youtube_gdata(url):
 
         entry = r.json()['entry']
 
+        ## Author
         author = entry['author'][0]['name']['$t']
 
+        ## Rating in stars
         try:
             rating = entry.get('gd$rating', None)['average']
         except TypeError:
@@ -380,16 +399,26 @@ def _handle_youtube_gdata(url):
 
         stars = int(round(rating)) * "*"
 
+        ## View count
         try:
-            views = entry['yt$statistics']['viewCount']
-        except:
+            views = int(entry['yt$statistics']['viewCount'])
+
+            import math
+            millnames=['','k','M','Billion','Trillion']
+            millidx=max(0,min(len(millnames)-1, int(math.floor(math.log10(abs(views))/3.0))))
+            views = '%.0f%s'%(views/10**(3*millidx),millnames[millidx])
+        except KeyError:
+            # No views at all, the whole yt$statistics block is missing
             views = 'no'
 
+        ## Title
         title = entry['title']['$t']
 
+        ## Age restricted?
         # https://developers.google.com/youtube/2.0/reference#youtube_data_api_tag_media:rating
         rating = entry['media$group'].get('media$rating', None)
 
+        ## Content length
         secs = int(entry['media$group']['yt$duration']['seconds'])
         lengthstr = []
         hours, minutes, seconds = secs // 3600, secs // 60 % 60, secs % 60
@@ -403,7 +432,28 @@ def _handle_youtube_gdata(url):
             adult = " - XXX"
         else:
             adult = ""
-        return "%s by %s [%s - %s - %s views%s]" % (title, author, "".join(lengthstr), "[%-5s]" % stars, views, adult)
+
+        ## Content age
+        published = entry['published']['$t']
+        published = datetime.strptime(published, "%Y-%m-%dT%H:%M:%S.%fZ")
+        age = datetime.now() - published
+        halfyears, days = age.days // 182, age.days % 365
+        agestr = []
+        years = halfyears * 0.5
+        if years >= 1:
+            agestr.append("%gy" % years)
+        # don't display days for videos older than 6 months
+        if years < 1 and days > 0:
+            agestr.append("%dd" % days)
+        # complete the age string
+        if agestr and days != 0:
+            agestr.append(" ago")
+        elif years == 0 and days == 0:  # uploaded TODAY, whoa.
+            agestr.append("FRESH")
+        else:
+            agestr.append("ANANASAKÄÄMÄ")  # this should never happen =)
+
+        return "%s by %s [%s - %s - %s views - %s%s]" % (title, author, "".join(lengthstr), "[%-5s]" % stars, views, "".join(agestr), adult)
 
 
 def _handle_helmet(url):
@@ -460,7 +510,18 @@ def _handle_vimeo(url):
         user = info['user_name']
         likes = info['stats_number_of_likes']
         plays = info['stats_number_of_plays']
-        return "%s by %s [%s likes, %s views]" % (title, user, likes, plays)
+
+        secs = info['duration']
+        lengthstr = []
+        hours, minutes, seconds = secs // 3600, secs // 60 % 60, secs % 60
+        if hours > 0:
+            lengthstr.append("%dh" % hours)
+        if minutes > 0:
+            lengthstr.append("%dm" % minutes)
+        if seconds > 0:
+            lengthstr.append("%ds" % seconds)
+
+        return "%s by %s [%s - %s likes, %s views]" % (title, user, "".join(lengthstr), likes, plays)
 
 
 def _handle_stackoverflow(url):
@@ -493,7 +554,6 @@ def _handle_hs(url):
     title = title.split("-")[0].strip()
     try:
         # determine article age and warn if it is too old
-        from datetime import datetime
         # handle updated news items of format, and get the latest update stamp
         # 20.7.2010 8:02 | PÃ¤ivitetty: 20.7.2010 12:53
         date = bs.find('p', {'class': 'date'}).next
@@ -517,7 +577,7 @@ def _handle_hs(url):
 def _handle_mtv3(url):
     """*mtv3.fi*"""
     bs = __get_bs(url)
-    title = bs.find("h1", "entry-title").text
+    title = bs.find("h1", "otsikko").text
     return title
 
 
@@ -566,7 +626,8 @@ def _handle_imgur(url):
     headers = {"Authorization": "Client-ID %s" % client_id}
 
     # regexes and matching API endpoints
-    endpoints = [("i.imgur.com/(.*)\.(jpg|png|gif)", "gallery"),
+    endpoints = [("imgur.com/r/.*?/(.*)", "gallery/r/all"),
+                 ("i.imgur.com/(.*)\.(jpg|png|gif)", "gallery"),
                  ("imgur.com/gallery/(.*)", "gallery"),
                  ("imgur.com/a/([^\?]+)", "album"),
                  ("imgur.com/([^\./]+)", "gallery")
@@ -597,6 +658,13 @@ def _handle_imgur(url):
             imgcount = len(data['data']['images'])
             if imgcount > 1:
                 title += " [%d images]" % len(data['data']['images'])
+    elif data['status'] == 404 and endpoint != "gallery/r/all":
+        endpoint = "gallery/r/all"
+        log.debug("Not found, seeing if it is a subreddit image")
+        r = get_url("%s/%s/%s" % (api, endpoint, resource_id), headers=headers)
+        data = r.json()
+        if data['status'] == 200:
+            title = r.json()['data']['title']
     else:
         log.debug("imgur API error: %d %s" % (data['status'], data['data']['error']))
         return None

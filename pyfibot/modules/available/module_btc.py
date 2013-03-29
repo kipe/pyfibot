@@ -3,11 +3,33 @@ from __future__ import unicode_literals, print_function, division
 
 
 def command_btc(bot, user, channel, args):
-    """Display BTC exchange rates"""
+    """Display current BTC exchange rates from mtgox. Usage: btc [whitespace separated list of currency codes]"""
+    currencies = ["EUR"]
 
-    r = bot.get_url("http://bitcoincharts.com/t/weighted_prices.json")
-    data = r.json()
-    eur_rate = float(data['EUR']['24h'])
-    usd_rate = float(data['USD']['24h'])
+    if args:
+        currencies = args.split(" ")
 
-    return bot.say(channel, "1 BTC = $%.2f / %.2f€" % (usd_rate, eur_rate))
+    rates = []
+
+    for currency in currencies:
+        rate = gen_string(bot, currency)
+        if rate:
+            rates.append(rate)
+
+    if rates:
+        return bot.say(channel, "1 BTC = %s" % " | ".join(rates))
+
+
+def gen_string(bot, currency):
+    r = bot.get_url("http://data.mtgox.com/api/1/BTC%s/ticker" % currency)
+
+    if r.json()['result'] != 'success':
+        return None
+
+    data = r.json()['return']
+
+    avg  = data['avg']['display_short']
+    low  = data['low']['display_short']
+    high = data['high']['display_short']
+
+    return "%s avg:%s low:%s high:%s" % (currency.upper(), avg, low, high)

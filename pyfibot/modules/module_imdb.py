@@ -1,8 +1,6 @@
 """
-$Id$
-$HeadURL$
+Parse IMDB urls and display movie information for them
 """
-
 from __future__ import unicode_literals, print_function, division
 has_imdb = False
 
@@ -39,7 +37,11 @@ def handle_url(bot, user, channel, url, msg):
     if bottomrank:
         rank = "Bottom 100: #%d" % bottomrank
 
-    genre = "(" + "/".join(movie.get('genres')) + ")"
+    genres = movie.get('genres')
+    if genres:
+        genre = "(" + "/".join(genres) + ")"
+    else:
+        genre = ""
 
     msg = "[IMDB] %s - Rating: %.1f (%s votes) %s %s" % (title, rating, votes, genre, rank)
     msg = msg.encode("UTF-8")
