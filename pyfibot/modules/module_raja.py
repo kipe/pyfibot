@@ -23,7 +23,7 @@ def make_string(data, direction):
     return u'Suomeen: %s, %s, %s' % (nuijamaa, sveto, vaalimaa)
 
 
-def command_jou(bot, user, channel, args):
+def command_raja(bot, user, channel, args):
     data = get_data()
     bot.say(make_string(data, 'ToRussia'))
     bot.say(make_string(data, 'ToFinland'))
