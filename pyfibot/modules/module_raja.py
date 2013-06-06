@@ -25,5 +25,5 @@ def make_string(data, direction):
 
 def command_raja(bot, user, channel, args):
     data = get_data()
-    bot.say(make_string(data, 'ToRussia'))
-    bot.say(make_string(data, 'ToFinland'))
+    bot.say(channel, make_string(data, 'ToRussia'))
+    bot.say(channel, make_string(data, 'ToFinland'))
