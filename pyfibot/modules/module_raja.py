@@ -33,8 +33,8 @@ def make_string(data, to_russia):
         minutes = int(m.group(3))
 
         if hours > 0:
-            return '%i hours, %i minutes' % (hours, minutes)
-        return '%i minutes' % (minutes)
+            return '%i h, %i min' % (hours, minutes)
+        return '%i min' % (minutes)
 
     updatetime = get_updatetime(data)
     nuijamaa = u'Nuijamaa: %s' % (get_wait(data['NuijBrus']['Time']))
