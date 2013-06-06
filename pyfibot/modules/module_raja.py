@@ -28,7 +28,7 @@ def make_string(data, direction):
 
     if direction == 'ToRussia':
         return u'Venäjälle: %s, %s, %s (%s)' % (nuijamaa, sveto, vaalimaa, updateTime.strftime('%H:%M'))
-    return u'Suomeen: %s, %s, %s (%s)' % (nuijamaa, sveto, vaalimaa, updateTime.strftime('%H:%M'))
+    return u'  Suomeen: %s, %s, %s (%s)' % (nuijamaa, sveto, vaalimaa, updateTime.strftime('%H:%M'))
 
 
 def command_raja(bot, user, channel, args):
