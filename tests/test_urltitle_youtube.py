@@ -1,5 +1,4 @@
 from nose.tools import eq_
-
 import bot_mock
 from pyfibot.modules import module_urltitle
 

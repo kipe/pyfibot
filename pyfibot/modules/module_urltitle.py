@@ -371,7 +371,10 @@ def _handle_youtube_gdata_new(url):
 
 def _handle_youtube_gdata(url):
     """http*://*youtube.com/watch?*v=*"""
-    gdata_url = "http://gdata.youtube.com/feeds/api/videos/%s"
+    # Fetches everything the api knows about the video
+    #gdata_url = "http://gdata.youtube.com/feeds/api/videos/%s"
+    # This fetches everything that is needed by the handle, using partial response.
+    gdata_url = "https://gdata.youtube.com/feeds/api/videos/%s?fields=title,author,gd:rating,media:group(yt:duration),media:group(media:rating),yt:statistics,published&alt=json&v=2"
 
     match = re.match("https?://youtu.be/(.*)", url)
     if not match:
@@ -620,7 +623,6 @@ def _handle_areena(url):
 
 def _handle_wikipedia(url):
     """*wikipedia.org*"""
-    api = "http://en.wikipedia.org/w/api.php"
     params = {
         'format': 'json',
         'action': 'parse',
@@ -631,6 +633,9 @@ def _handle_wikipedia(url):
     # rvexpandtemplates
 
     params['page'] = url.split('/')[-1]
+    language = url.split('/')[2].split('.')[0]
+
+    api = "http://%s.wikipedia.org/w/api.php" % (language)
 
     r = get_url(api, params=params)
 
@@ -639,7 +644,7 @@ def _handle_wikipedia(url):
     rg = re.compile('<p>(.*)<\/p>')
     m = rg.search(content)
     tag_re = re.compile(r'<[^>]+>')
-    to_return = tag_re.sub('', m.group(1)).split('.')[0]
+    to_return = tag_re.sub('', m.group(1)).split('. ')[0]
 
     if len(to_return) > 100:
         return to_return[:-100] + '...'
