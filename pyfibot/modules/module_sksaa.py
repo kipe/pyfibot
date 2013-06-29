@@ -27,5 +27,7 @@ def command_sksaa(bot, user, channel, args):
         for s in data['data']:
             if s['pk'] in sensors:
                 sensordata.append(u'%s: %.1f°C' % (s['fields']['name'], s['fields']['last_temperature']))
-        return bot.say(channel, 'Or4: %s' % ', '.join(sensordata))
+        if isAdmin(user):
+            return bot.say(channel, 'Or4: %s' % ', '.join(sensordata))
+        return bot.say(channel, 'Or4: %s' % sensordata[0])
     return bot.say(channel, '".sksaa" toistaiseksi pois käytöstä, kokeile ".saa"')
