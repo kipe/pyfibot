@@ -31,7 +31,8 @@ class UserSQL:
                 last_event VARCHAR(25),
                 last_seen timestamp,
                 autoop BOOLEAN,
-                autovoice BOOLEAN
+                autovoice BOOLEAN,
+                alternative_nicks TEXT
                 );'''
             self.c.execute(sql)
 
@@ -41,8 +42,8 @@ class UserSQL:
             ident = getIdent(user)
             host = getHost(user)
 
-            sql = 'INSERT OR IGNORE INTO users (nick, ident, host, last_seen, autoop, autovoice) VALUES (?, ?, ?, ?, ?, ?);'
-            data = (nick, ident, host, datetime.now(), False, False)
+            sql = 'INSERT OR IGNORE INTO users (nick, ident, host, last_seen, autoop, autovoice, alternative_nicks) VALUES (?, ?, ?, ?, ?, ?, ?);'
+            data = (nick, ident, host, datetime.now(), False, False, '')
             self.c.execute(sql, data)
 
     def _close_conn(self):
@@ -50,6 +51,20 @@ class UserSQL:
         self.c.close()
         self.conn.commit()
         self.conn.close()
+
+    def _get_alternative_nicks(self, user):
+        '''Fetches users alternative nicks from database. Returns list of nicks.'''
+        nick = getNick(user)
+        ident = getIdent(user)
+        host = getHost(user)
+
+        sql = 'SELECT alternative_nicks FROM users WHERE nick = ? AND ident = ? AND host = ? LIMIT 1;'
+        data = (nick, ident, host)
+        self.c.execute(sql, data)
+        row = self.c.fetchone()
+        if row:
+            return filter(None, row[0].split(','))
+        return []
 
     def update_user(self, user, channel, event, message=None, spoke=False):
         '''Updates user data to database.'''
@@ -107,9 +122,16 @@ class UserSQL:
             if f.endswith('.db'):
                 # DON'T create user here, we don't want it on every database of network
                 self._get_conn(f.strip('.db'))
+                # Get users alternative nicks
+                alternative_nicks = self._get_alternative_nicks(user)
+                # if new nick is already in alternative nicks, remove it
+                if newnick in alternative_nicks:
+                    alternative_nicks.remove(newnick)
+                # add old nick to alternative nicks
+                alternative_nicks.append(nick)
 
-                sql = 'UPDATE users SET nick = ?, last_event = ?, last_seen = ? WHERE nick = ? AND ident = ? AND host = ? LIMIT 1;'
-                data = (newnick, 'nick_change', now, nick, ident, host)
+                sql = 'UPDATE users SET nick = ?, last_event = ?, last_seen = ?, alternative_nicks = ? WHERE nick = ? AND ident = ? AND host = ? LIMIT 1;'
+                data = (newnick, 'nick_change', now, ','.join(alternative_nicks), nick, ident, host)
                 self.c.execute(sql, data)
                 self._close_conn()
 
@@ -132,15 +154,28 @@ class UserSQL:
 
     def find_nick(self, bot, nick, channel):
         '''Finds row by nick from database.'''
+        alternative = False
+
         self._get_conn(channel)
         # search nick
         sql = 'SELECT * FROM users WHERE nick = ? LIMIT 1;'
         data = (nick,)
         self.c.execute(sql, data)
         row = self.c.fetchone()
-        self._close_conn()
 
-        return row
+        if not row:
+            alternative = True
+            sql = 'SELECT * FROM users WHERE alternative_nicks LIKE ? LIMIT 1;'
+            data = ('%%%s%%' % nick,)
+            self.c.execute(sql, data)
+            row = self.c.fetchone()
+            if row:
+                alternative_nicks = filter(None, row[9].split(','))
+                if nick not in alternative_nicks:
+                    row = None
+
+        self._close_conn()
+        return row, alternative
 
 
 def handle_privmsg(bot, user, channel, message):
@@ -181,7 +216,7 @@ def command_lastseen(bot, user, channel, args):
         return bot.say(channel, 'Please provide nick to search.')
 
     s = UserSQL(bot)
-    row = s.find_nick(bot, args, channel)
+    row, alternative = s.find_nick(bot, args, channel)
     msg = 'I have no idea who %s is. At least I haven\'t seen him/her on %s.' % (args, channel)
     if row:
         msg = '%s!%s@%s was last seen at %s (%s)' % (row[0], row[1], row[2], row[6].strftime('%d.%m.%y %H:%M'), row[5])
@@ -194,7 +229,7 @@ def command_lastspoke(bot, user, channel, args):
         return bot.say(channel, 'Please provide nick to search.')
 
     s = UserSQL(bot)
-    row = s.find_nick(bot, args, channel)
+    row, alternative = s.find_nick(bot, args, channel)
     msg = 'I have no idea who %s is. At least I haven\'t seen him/her on %s.' % (args, channel)
     if row:
         msg = '%s!%s@%s last spoke at %s' % (row[0], row[1], row[2], row[4].strftime('%d.%m.%y %H:%M'))
