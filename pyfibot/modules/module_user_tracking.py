@@ -51,18 +51,23 @@ class UserSQL:
             self.c.execute(sql, data)
 
     def _close_conn(self):
-        '''Close connection cleanly.'''
+        ''' Close connection cleanly. '''
         self.c.close()
         self.conn.commit()
         self.conn.close()
 
     def _get_user(self, user):
+        ''' Fetches user row from database '''
         selector, data = self._get_user_selector(user)
         sql = 'SELECT * FROM users WHERE %s LIMIT 1;' % selector
         self.c.execute(sql, data)
         return self.c.fetchone()
 
     def _get_user_selector(self, user):
+        '''
+        Creates selectors for sql from nickmask, nick etc.
+        Used in many situations, normally full mask is available -> nick, ident and host.
+        '''
         nick = getNick(user)
         try:
             ident = getIdent(user)
@@ -85,7 +90,7 @@ class UserSQL:
         return sql, data
 
     def _get_alternative_nicks(self, user):
-        '''Fetches users alternative nicks from database. Returns list of nicks.'''
+        ''' Fetches users alternative nicks from database. Returns list of nicks. '''
         selector, data = self._get_user_selector(user)
 
         sql = 'SELECT alternative_nicks FROM users WHERE %s LIMIT 1;' % (selector)
@@ -96,7 +101,7 @@ class UserSQL:
         return []
 
     def update_user(self, bot, user, channel, event, message=None, spoke=False):
-        '''Updates user data to database.'''
+        ''' Updates user data to database. '''
         selector, selector_data = self._get_user_selector(user)
         now = datetime.now()
 
@@ -132,7 +137,7 @@ class UserSQL:
         log.debug('user %s updated' % (user))
 
     def kicked(self, kickee, channel, kicker, message):
-        '''Handle user being kicked.'''
+        ''' Handle user being kicked. '''
         # TODO: try and get user instead of nick
         # Seems like needs a working whois, as botcore.userKicked receives only nick from kickee
         # Kicker however is an user -object...
@@ -150,10 +155,7 @@ class UserSQL:
         log.info('user %s kicked from %s by %s [%s]' % (kickee, channel, kicker, message))
 
     def nick_change(self, user, newnick):
-        '''Handle user nick change.'''
-        # nick = getNick(user)
-        # ident = getIdent(user)
-        # host = getHost(user)
+        ''' Handle user nick change. '''
         selector, selector_data = self._get_user_selector(user)
 
         now = datetime.now()
@@ -177,7 +179,7 @@ class UserSQL:
         log.debug('user %s is now known as %s' % (user, newnick))
 
     def user_quit(self, user, message):
-        '''Handle user quitting.'''
+        ''' Handle user quitting. '''
         selector, selector_data = self._get_user_selector(user)
 
         now = datetime.now()
@@ -193,7 +195,7 @@ class UserSQL:
         log.debug('user %s quit [%s]' % (user, message))
 
     def find_nick(self, bot, nick, channel):
-        '''Finds row by nick from database.'''
+        ''' Finds row by nick from database. '''
         alternative = False
 
         self._get_conn(channel)
@@ -203,6 +205,7 @@ class UserSQL:
         self.c.execute(sql, data)
         row = self.c.fetchone()
 
+        # if not found by last one, search by alternative nick
         if not row:
             alternative = True
             sql = 'SELECT * FROM users WHERE alternative_nicks LIKE ? LIMIT 1;'
@@ -211,6 +214,7 @@ class UserSQL:
             row = self.c.fetchone()
             if row:
                 alternative_nicks = filter(None, row[str('alternative_nicks')].split(','))
+                # check that the search term really is in the alternative nick -list, else we don't want to give out crap
                 if nick not in alternative_nicks:
                     row = None
 
@@ -218,6 +222,12 @@ class UserSQL:
         return row, alternative
 
     def set_autoop(self, user, channel, state):
+        '''
+        Sets auto-op status for user.
+        Returns:
+            - 0 if can't find the user (or autop-op state already is what we wanted)
+            - SQL row of user, if the user was changed.
+        '''
         reval = None
         selector, selector_data = self._get_user_selector(user)
 
@@ -225,6 +235,7 @@ class UserSQL:
         sql = 'UPDATE users SET autoop = ? WHERE autoop = ? AND %s LIMIT 1;' % (selector)
         self.c.execute(sql, (state, not state) + selector_data)
         reval = self.c.rowcount
+        # if there was rows affected, fetch the users row
         if reval:
             reval = self._get_user(user)
         self._close_conn()
@@ -264,6 +275,7 @@ def handle_userRenamed(bot, user, newnick):
 
 
 def command_lastseen(bot, user, channel, args):
+    ''' Search for user, returns when the user was last seen. '''
     args = args.strip()
     if not args:
         return bot.say(channel, 'Please provide nick to search.')
@@ -279,6 +291,7 @@ def command_lastseen(bot, user, channel, args):
 
 
 def command_lastspoke(bot, user, channel, args):
+    ''' Search for user, returns when the user last spoke. '''
     args = args.strip()
     if not args:
         return bot.say(channel, 'Please provide nick to search.')
@@ -292,6 +305,7 @@ def command_lastspoke(bot, user, channel, args):
 
 
 def command_set_autoop(bot, user, channel, args):
+    ''' Sets autoop for user. '''
     args = args.strip()
     if not isAdmin(user) or not args:
         return
@@ -306,6 +320,7 @@ def command_set_autoop(bot, user, channel, args):
 
 
 def command_remove_autoop(bot, user, channel, args):
+    ''' Removes autoop from user. '''
     args = args.strip()
     if not isAdmin(user) or not args:
         return
