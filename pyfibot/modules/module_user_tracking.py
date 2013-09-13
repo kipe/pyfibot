@@ -243,6 +243,7 @@ class UserSQL:
         return reval
 
 
+# HANDLERS
 def handle_privmsg(bot, user, channel, message):
     # no need to log private messages...
     if user == channel:
@@ -275,6 +276,7 @@ def handle_userRenamed(bot, user, newnick):
     s.nick_change(user, newnick)
 
 
+# COMMANDS
 def command_lastseen(bot, user, channel, args):
     ''' Search for user, returns when the user was last seen. '''
     args = args.strip()
