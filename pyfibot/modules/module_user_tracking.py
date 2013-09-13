@@ -170,7 +170,7 @@ class UserSQL:
                 if newnick in alternative_nicks:
                     alternative_nicks.remove(newnick)
                 # add old nick to alternative nicks
-                alternative_nicks.append(nick)
+                alternative_nicks.append(selector_data[0])
 
                 sql = 'UPDATE users SET nick = ?, last_event = ?, last_seen = ?, alternative_nicks = ? WHERE %s LIMIT 1;' % selector
                 data = (newnick, 'nick_change', now, ','.join(alternative_nicks)) + selector_data
