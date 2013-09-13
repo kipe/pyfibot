@@ -10,6 +10,7 @@ log = logging.getLogger('user_tracking')
 
 class UserSQL:
     def __init__(self, bot):
+        # database directory for example 'databases/nerv'
         self.db_dir = os.path.join('databases', bot.network.alias)
         if not os.path.exists(self.db_dir):
             os.makedirs(self.db_dir)
@@ -19,6 +20,7 @@ class UserSQL:
         Create connection to database (create it if doesn't exist)
         Also creates user, if arg is present (and user doesn't exist in db).
         '''
+        # database for example 'databases/nerv/#pyfibot.db'
         channel_db = os.path.join(self.db_dir, channel + '.db')
         create_db = not os.path.exists(channel_db)
         self.conn = sqlite3.connect(channel_db, detect_types=sqlite3.PARSE_DECLTYPES)
@@ -260,6 +262,8 @@ def handle_userJoined(bot, user, channel):
 
 def handle_userLeft(bot, user, channel, message):
     s = UserSQL(bot)
+    # QUIT returns the channel as None
+    #  -> set the data for every channel in database
     if channel is not None:
         s.update_user(bot, user, channel, 'left', message)
     else:
