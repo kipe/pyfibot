@@ -459,6 +459,11 @@ class PyFiBot(irc.IRCClient, CoreCommands):
                 params.append("")
             self.userLeft(prefix, channel, params[1])
 
+    def irc_NICK(self, prefix, params):
+        """override the twisted version to preserve full userhost info"""
+        newnick = params[0]
+        self.userRenamed(prefix, newnick)
+
     def irc_QUIT(self, prefix, params):
         """QUIT-handler.
 
@@ -518,9 +523,9 @@ class PyFiBot(irc.IRCClient, CoreCommands):
         """Save topic to maindb when it changes"""
         self._runhandler("topicUpdated", user, channel, topic)
 
-    def userRenamed(self, oldnick, newnick):
+    def userRenamed(self, old_user, newnick):
         """Someone changed their nick"""
-        self._runhandler("userRenamed", oldnick, newnick)
+        self._runhandler("userRenamed", old_user, newnick)
 
     def receivedMOTD(self, motd):
         """MOTD"""
