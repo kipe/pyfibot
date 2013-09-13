@@ -214,7 +214,7 @@ class UserSQL:
             row = self.c.fetchone()
             if row:
                 alternative_nicks = filter(None, row[str('alternative_nicks')].split(','))
-                # check that the search term really is in the alternative nick -list, else we don't want to give out crap
+                # check that the search term really is in the alternative nick -list, else don't want to give out crap
                 if nick not in alternative_nicks:
                     row = None
 
@@ -231,6 +231,7 @@ class UserSQL:
         reval = None
         selector, selector_data = self._get_user_selector(user)
 
+        # NOTE: The user-mask might be incomplete, don't want to create user with that info.
         self._get_conn(channel)
         sql = 'UPDATE users SET autoop = ? WHERE autoop = ? AND %s LIMIT 1;' % (selector)
         self.c.execute(sql, (state, not state) + selector_data)
