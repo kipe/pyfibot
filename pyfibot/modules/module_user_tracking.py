@@ -44,12 +44,10 @@ class UserSQL:
 
         # if user is specified, create it (or if exists already, ignore)
         if user is not None:
-            nick = getNick(user)
-            ident = getIdent(user)
-            host = getHost(user)
+            selector, selector_data = self._get_user_selector(user)
 
             sql = 'INSERT OR IGNORE INTO users (nick, ident, host, last_seen, autoop, autovoice, alternative_nicks) VALUES (?, ?, ?, ?, ?, ?, ?);'
-            data = (nick, ident, host, datetime.now(), False, False, '')
+            data = selector_data + (datetime.now(), False, False, '')
             self.c.execute(sql, data)
 
     def _close_conn(self):
@@ -60,8 +58,8 @@ class UserSQL:
 
     def _get_user(self, user):
         ''' Fetches user row from database '''
-        selector, data = self._get_user_selector(user)
-        sql = 'SELECT * FROM users WHERE %s LIMIT 1;' % selector
+        selector, selector_data = self._get_user_selector(user)
+        sql = 'SELECT * FROM users WHERE %s LIMIT 1;' % selector_data
         self.c.execute(sql, data)
         return self.c.fetchone()
 
@@ -93,10 +91,10 @@ class UserSQL:
 
     def _get_alternative_nicks(self, user):
         ''' Fetches users alternative nicks from database. Returns list of nicks. '''
-        selector, data = self._get_user_selector(user)
+        selector, selector_data = self._get_user_selector(user)
 
         sql = 'SELECT alternative_nicks FROM users WHERE %s LIMIT 1;' % (selector)
-        self.c.execute(sql, data)
+        self.c.execute(sql, selector_data)
         row = self.c.fetchone()
         if row:
             return filter(None, row[str('alternative_nicks')].split(','))
