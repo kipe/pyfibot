@@ -125,7 +125,7 @@ class UserSQL:
             self.c.execute(sql, selector_data)
             row = self.c.fetchone()
             if row[str('autoop')]:
-                bot.mode(channel, True, 'o', user=nick)
+                bot.mode(channel, True, 'o', user=selector_data[0])
                 log.info('user %s autoopped on %s' % (user, channel))
 
         self._close_conn()
