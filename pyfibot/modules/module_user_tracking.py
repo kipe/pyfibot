@@ -59,8 +59,8 @@ class UserSQL:
     def _get_user(self, user):
         ''' Fetches user row from database '''
         selector, selector_data = self._get_user_selector(user)
-        sql = 'SELECT * FROM users WHERE %s LIMIT 1;' % selector_data
-        self.c.execute(sql, data)
+        sql = 'SELECT * FROM users WHERE %s LIMIT 1;' % selector
+        self.c.execute(sql, selector_data)
         return self.c.fetchone()
 
     def _get_user_selector(self, user):
@@ -132,6 +132,9 @@ class UserSQL:
             if row[str('autoop')]:
                 bot.mode(channel, True, 'o', user=selector_data[0])
                 log.info('user %s autoopped on %s' % (user, channel))
+            if row[str('autovoice')]:
+                bot.mode(channel, True, 'v', user=selector_data[0])
+                log.info('user %s autovoiced on %s' % (user, channel))
 
         self._close_conn()
         log.debug('user %s updated' % (user))
@@ -157,6 +160,7 @@ class UserSQL:
     def nick_change(self, user, newnick):
         ''' Handle user nick change. '''
         selector, selector_data = self._get_user_selector(user)
+        new_user = '%s!%s@%s' % (newnick, selector_data[1], selector_data[2])
 
         now = datetime.now()
         # loop through the networks databases and change nick to every db
@@ -166,11 +170,19 @@ class UserSQL:
                 self._get_conn(f.strip('.db'))
                 # Get users alternative nicks
                 alternative_nicks = self._get_alternative_nicks(user)
+                alternative_nicks.extend(self._get_alternative_nicks(new_user))
                 # if new nick is already in alternative nicks, remove it
                 if newnick in alternative_nicks:
                     alternative_nicks.remove(newnick)
                 # add old nick to alternative nicks
                 alternative_nicks.append(selector_data[0])
+                # filter empty strings from alternative nicks and remove duplicates
+                alternative_nicks = list(set(filter(None, alternative_nicks)))
+
+                # remove rows which would conflict with the updated row
+                sql = 'DELETE FROM users WHERE nick = ? AND ident = ? AND host = ?;'
+                data = (newnick, selector_data[1], selector_data[2])
+                self.c.execute(sql, data)
 
                 sql = 'UPDATE users SET nick = ?, last_event = ?, last_seen = ?, alternative_nicks = ? WHERE %s LIMIT 1;' % selector
                 data = (newnick, 'nick_change', now, ','.join(alternative_nicks)) + selector_data
@@ -221,7 +233,7 @@ class UserSQL:
         self._close_conn()
         return row, alternative
 
-    def set_autoop(self, user, channel, state):
+    def set_field(self, user, channel, field, state):
         '''
         Sets auto-op status for user.
         Returns:
@@ -230,10 +242,11 @@ class UserSQL:
         '''
         reval = None
         selector, selector_data = self._get_user_selector(user)
+        selector = (field, field, selector)
 
         # NOTE: The user-mask might be incomplete, don't want to create user with that info.
         self._get_conn(channel)
-        sql = 'UPDATE users SET autoop = ? WHERE autoop = ? AND %s LIMIT 1;' % (selector)
+        sql = 'UPDATE users SET %s = ? WHERE %s = ? AND %s LIMIT 1;' % (selector)
         self.c.execute(sql, (state, not state) + selector_data)
         reval = self.c.rowcount
         # if there was rows affected, fetch the users row
@@ -317,9 +330,9 @@ def command_set_autoop(bot, user, channel, args):
 
     msg = 'No user found with "%s".' % (args)
     s = UserSQL(bot)
-    row = s.set_autoop(args, channel, True)
+    row = s.set_field(args, channel, 'autoop', True)
     if row:
-        msg = 'Auto-opping %s!%s@%s on %s.' % (row[str('nick')], row[str('ident')], row[str('host')], channel)
+        msg = 'Set autoop for %s!%s@%s on %s.' % (row[str('nick')], row[str('ident')], row[str('host')], channel)
         log.info(msg)
     return bot.say(channel, msg)
 
@@ -332,8 +345,38 @@ def command_remove_autoop(bot, user, channel, args):
 
     msg = 'No user found with "%s" (or not auto-opped).' % (args)
     s = UserSQL(bot)
-    row = s.set_autoop(args, channel, False)
+    row = s.set_field(args, channel, 'autoop', False)
     if row:
         msg = 'Removed auto-op from %s!%s@%s on %s.' % (row[str('nick')], row[str('ident')], row[str('host')], channel)
+        log.info(msg)
+    return bot.say(channel, msg)
+
+
+def command_set_autovoice(bot, user, channel, args):
+    ''' Sets autovoice for user. '''
+    args = args.strip()
+    if not isAdmin(user) or not args:
+        return
+
+    msg = 'No user found with "%s".' % (args)
+    s = UserSQL(bot)
+    row = s.set_field(args, channel, 'autovoice', True)
+    if row:
+        msg = 'Set autovoice for %s!%s@%s on %s.' % (row[str('nick')], row[str('ident')], row[str('host')], channel)
+        log.info(msg)
+    return bot.say(channel, msg)
+
+
+def command_remove_autovoice(bot, user, channel, args):
+    ''' Removes autovoice from user. '''
+    args = args.strip()
+    if not isAdmin(user) or not args:
+        return
+
+    msg = 'No user found with "%s" (or not auto-voiced).' % (args)
+    s = UserSQL(bot)
+    row = s.set_field(args, channel, 'autovoice', False)
+    if row:
+        msg = 'Removed autovoice from %s!%s@%s on %s.' % (row[str('nick')], row[str('ident')], row[str('host')], channel)
         log.info(msg)
     return bot.say(channel, msg)
