@@ -308,6 +308,11 @@ def handle_userRenamed(bot, user, newnick):
     s.nick_change(user, newnick)
 
 
+def handle_action(bot, user, channel, data):
+    s = UserSQL(bot)
+    s.update_user(bot, user, channel, 'action', data)
+
+
 # COMMANDS
 def command_lastseen(bot, user, channel, args):
     ''' Search for user, returns when the user was last seen. '''

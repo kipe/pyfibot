@@ -529,7 +529,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
 
     def action(self, user, channel, data):
         """An action"""
-        self._runhandler("action", user, channel, data)
+        self._runhandler("action", user, channel, self._to_unicode(data))
 
     def topicUpdated(self, user, channel, topic):
         """Save topic to maindb when it changes"""
