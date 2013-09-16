@@ -521,11 +521,11 @@ class PyFiBot(irc.IRCClient, CoreCommands):
 
     def userLeft(self, user, channel, message):
         """Someone left"""
-        self._runhandler("userLeft", user, channel, message)
+        self._runhandler("userLeft", user, channel, self._to_unicode(message))
 
     def userKicked(self, kickee, channel, kicker, message):
         """Someone got kicked by someone"""
-        self._runhandler("userKicked", kickee, channel, kicker, message)
+        self._runhandler("userKicked", kickee, channel, kicker, self._to_unicode(message))
 
     def action(self, user, channel, data):
         """An action"""
@@ -533,7 +533,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
 
     def topicUpdated(self, user, channel, topic):
         """Save topic to maindb when it changes"""
-        self._runhandler("topicUpdated", user, channel, topic)
+        self._runhandler("topicUpdated", user, channel, self._to_unicode(topic))
 
     def userRenamed(self, old_user, newnick):
         """Someone changed their nick"""
@@ -541,7 +541,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
 
     def receivedMOTD(self, motd):
         """MOTD"""
-        self._runhandler("receivedMOTD", motd)
+        self._runhandler("receivedMOTD", self._to_unicode(motd))
 
     ## SERVER INFORMATION
 
