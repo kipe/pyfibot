@@ -168,12 +168,29 @@ class UserSQL:
             if f.endswith('.db'):
                 # DON'T create user here, we don't want it on every database of network
                 self._get_conn(f.strip('.db'))
-                # Get users alternative nicks
-                alternative_nicks = self._get_alternative_nicks(user)
-                alternative_nicks.extend(self._get_alternative_nicks(new_user))
+                user_row = self._get_user(user)
+                # if user isn't on current channel, close connection and continue
+                if not user_row:
+                    self._close_conn()
+                    continue
+
+                # Get users alternative nicks, autoop and autovoice states
+                alternative_nicks = user_row[str('alternative_nicks')].split(',')
+                autoop = user_row[str('autoop')]
+                autovoice = user_row[str('autovoice')]
+
+                # Get new_users row from database
+                new_user_row = self._get_user(new_user)
+                if new_user_row:
+                    # Determine autoop and autovoice states
+                    autoop = autoop or new_user_row[str('autoop')]
+                    autovoice = autovoice or new_user_row[str('autovoice')]
+                    # Extend alternative nicks
+                    alternative_nicks.extend(new_user_row[str('alternative_nicks')].split(','))
+
                 # if new nick is already in alternative nicks, remove it
                 if newnick in alternative_nicks:
-                    alternative_nicks.remove(newnick)
+                    alternative_nicks = [n for n in alternative_nicks if n != newnick]
                 # add old nick to alternative nicks
                 alternative_nicks.append(selector_data[0])
                 # filter empty strings from alternative nicks and remove duplicates
@@ -184,8 +201,8 @@ class UserSQL:
                 data = (newnick, selector_data[1], selector_data[2])
                 self.c.execute(sql, data)
 
-                sql = 'UPDATE users SET nick = ?, last_event = ?, last_seen = ?, alternative_nicks = ? WHERE %s LIMIT 1;' % selector
-                data = (newnick, 'nick_change', now, ','.join(alternative_nicks)) + selector_data
+                sql = 'UPDATE users SET nick = ?, last_event = ?, last_seen = ?, alternative_nicks = ?, autoop = ?, autovoice = ? WHERE %s LIMIT 1;' % selector
+                data = (newnick, 'nick_change', now, ','.join(alternative_nicks), autoop, autovoice) + selector_data
                 self.c.execute(sql, data)
                 self._close_conn()
         log.debug('user %s is now known as %s' % (user, newnick))
