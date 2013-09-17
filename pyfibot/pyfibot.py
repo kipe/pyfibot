@@ -226,6 +226,8 @@ class PyFiBotFactory(ThrottledClientFactory):
         g['getUrl'] = self.get_url
         g['get_url'] = self.get_url
         g['getNick'] = self.getNick
+        g['getIdent'] = self.getIdent
+        g['getHost'] = self.getHost
         g['isAdmin'] = self.isAdmin
         return g
 
@@ -242,7 +244,7 @@ class PyFiBotFactory(ThrottledClientFactory):
         s = requests.session()
         s.verify = False
         s.stream = True  # Don't fetch content unless asked
-        s.headers.update({'User-Agent':browser})
+        s.headers.update({'User-Agent': browser})
         # Custom headers from requester
         if headers:
             s.headers.update(headers)
@@ -271,6 +273,20 @@ class PyFiBotFactory(ThrottledClientFactory):
         @return: nick"""
         return user.split('!', 1)[0]
 
+    def getIdent(self, user):
+        """Parses ident from nick!user@host
+        @type user: string
+        @param user: nick!user@host
+        @return: ident"""
+        return user.split('!', 1)[1].split('@')[0]
+
+    def getHost(self, user):
+        """Parses host from nick!user@host
+        @type user: string
+        @param user: nick!user@host
+        @return: host"""
+        return user.split('@', 1)[1]
+
     def isAdmin(self, user):
         """Check if an user has admin privileges.
         @return: True or False"""
@@ -292,7 +308,7 @@ def init_logging(config):
         FORMAT = "[%(asctime)-15s][%(levelname)-20s][$BOLD%(name)-15s$RESET]  %(message)s"
         # Append file name + number if debug is enabled
         if config.get('debug', False):
-            FORMAT  = "%s %s" % (FORMAT, " ($BOLD%(filename)s$RESET:%(lineno)d)")
+            FORMAT = "%s %s" % (FORMAT, " ($BOLD%(filename)s$RESET:%(lineno)d)")
         COLOR_FORMAT = colorlogger.formatter_message(FORMAT, True)
         formatter = colorlogger.ColoredFormatter(COLOR_FORMAT)
     else:
@@ -300,7 +316,7 @@ def init_logging(config):
         formatter = logging.Formatter(FORMAT)
         # Append file name + number if debug is enabled
         if config.get('debug', False):
-            FORMAT  = "%s %s" % (FORMAT, " (%(filename)s:%(lineno)d)")
+            FORMAT = "%s %s" % (FORMAT, " (%(filename)s:%(lineno)d)")
 
     handler = logging.StreamHandler()
     handler.setFormatter(formatter)

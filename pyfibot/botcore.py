@@ -381,7 +381,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
                 try:
                     _string = _string.decode('utf-8')
                 except:
-                    _string = _string
+                    _string = _string.decode('iso-8859-1')
         return _string
 
     ### Overrides for twisted.words.irc core commands ###
@@ -471,6 +471,11 @@ class PyFiBot(irc.IRCClient, CoreCommands):
                 params.append("")
             self.userLeft(prefix, channel, params[1])
 
+    def irc_NICK(self, prefix, params):
+        """override the twisted version to preserve full userhost info"""
+        newnick = params[0]
+        self.userRenamed(prefix, newnick)
+
     def irc_QUIT(self, prefix, params):
         """QUIT-handler.
 
@@ -516,27 +521,27 @@ class PyFiBot(irc.IRCClient, CoreCommands):
 
     def userLeft(self, user, channel, message):
         """Someone left"""
-        self._runhandler("userLeft", user, channel, message)
+        self._runhandler("userLeft", user, channel, self._to_unicode(message))
 
     def userKicked(self, kickee, channel, kicker, message):
         """Someone got kicked by someone"""
-        self._runhandler("userKicked", kickee, channel, kicker, message)
+        self._runhandler("userKicked", kickee, channel, kicker, self._to_unicode(message))
 
     def action(self, user, channel, data):
         """An action"""
-        self._runhandler("action", user, channel, data)
+        self._runhandler("action", user, channel, self._to_unicode(data))
 
     def topicUpdated(self, user, channel, topic):
         """Save topic to maindb when it changes"""
-        self._runhandler("topicUpdated", user, channel, topic)
+        self._runhandler("topicUpdated", user, channel, self._to_unicode(topic))
 
-    def userRenamed(self, oldnick, newnick):
+    def userRenamed(self, old_user, newnick):
         """Someone changed their nick"""
-        self._runhandler("userRenamed", oldnick, newnick)
+        self._runhandler("userRenamed", old_user, newnick)
 
     def receivedMOTD(self, motd):
         """MOTD"""
-        self._runhandler("receivedMOTD", motd)
+        self._runhandler("receivedMOTD", self._to_unicode(motd))
 
     ## SERVER INFORMATION
 

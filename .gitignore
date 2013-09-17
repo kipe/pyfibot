@@ -3,6 +3,7 @@ config.yml
 include/
 man/
 module_autoop.db
+databases/
 pyfibot/bot.config
 rss.db
 
