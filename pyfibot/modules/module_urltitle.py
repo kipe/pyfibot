@@ -101,7 +101,7 @@ def __get_views(views):
     return '%.0f%s' % (views / 10 ** (3 * millidx), millnames[millidx])
 
 
-def handle_url(bot, user, channel, url, msg):
+def handle_url(bot, user, channel, url, msg, say=True):
     """Handle urls"""
 
     if msg.startswith("-"):
@@ -149,7 +149,7 @@ def handle_url(bot, user, channel, url, msg):
             if title:
                 cache.put(url, title)
                 # handler found, abort
-                return _title(bot, channel, title, True)
+                return _title(bot, channel, title, True, say=say)
 
     log.debug("No specific handler found, using generic")
     # Fall back to generic handler
@@ -181,7 +181,7 @@ def handle_url(bot, user, channel, url, msg):
         # Cache generic titles
         cache.put(url, title)
 
-        if config.get("check_redundant", True) and _check_redundant(url, title):
+        if config.get("check_redundant", True) and _check_redundant(url, title) and say:
             log.debug("%s is redundant, not displaying" % title)
             return
 
@@ -189,7 +189,7 @@ def handle_url(bot, user, channel, url, msg):
         if title in ignored_titles:
             return
         else:
-            return _title(bot, channel, title)
+            return _title(bot, channel, title, say=say)
 
     except AttributeError:
         # TODO: Nees a better way to handle this. Happens with empty <title> tags
@@ -253,7 +253,7 @@ def _levenshtein_distance(s, t):
     return d[len(s)][len(t)]
 
 
-def _title(bot, channel, title, smart=False, prefix=None):
+def _title(bot, channel, title, smart=False, prefix=None, say=True):
     """Say title to channel"""
 
     if not title:
@@ -271,9 +271,13 @@ def _title(bot, channel, title, smart=False, prefix=None):
         title = title[:200] + "..."
 
     if not info:
-        return bot.say(channel, "%s %s" % (prefix, title))
+        if say:
+            return bot.say(channel, "%s %s" % (prefix, title))
+        return title
     else:
-        return bot.say(channel, "%s %s [%s]" % (prefix, title, info))
+        if say:
+            return bot.say(channel, "%s %s [%s]" % (prefix, title, info))
+        return title
 
 
 # TODO: Some handlers does not have if not bs: return, but why do we even have this for every function
