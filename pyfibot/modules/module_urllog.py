@@ -6,10 +6,7 @@ import os
 from modules import module_urltitle
 
 
-def init(botref):
-    global bot
-    bot = botref
-    bot.config = bot.config.get("module_urltitle", {})
+def init(bot):
     module_urltitle.init(bot)
 
 
