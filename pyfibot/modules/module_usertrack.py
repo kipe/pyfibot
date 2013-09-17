@@ -41,6 +41,7 @@ class UserSQL:
                 alternative_nicks TEXT
                 );'''
             self.c.execute(sql)
+            self.conn.commit()
 
         # if user is specified, create it (or if exists already, ignore)
         if user is not None:
@@ -49,6 +50,7 @@ class UserSQL:
             sql = 'INSERT OR IGNORE INTO users (nick, ident, host, last_seen, autoop, autovoice, alternative_nicks) VALUES (?, ?, ?, ?, ?, ?, ?);'
             data = selector_data + (datetime.now(), False, False, '')
             self.c.execute(sql, data)
+            self.conn.commit()
 
     def _close_conn(self):
         ''' Close connection cleanly. '''
@@ -129,12 +131,13 @@ class UserSQL:
             sql = 'SELECT autoop, autovoice FROM users WHERE %s LIMIT 1;' % (selector)
             self.c.execute(sql, selector_data)
             row = self.c.fetchone()
-            if row[str('autoop')]:
-                bot.mode(channel, True, 'o', user=selector_data[0])
-                log.info('user %s autoopped on %s' % (user, channel))
-            if row[str('autovoice')]:
-                bot.mode(channel, True, 'v', user=selector_data[0])
-                log.info('user %s autovoiced on %s' % (user, channel))
+            if row:
+                if row[str('autoop')]:
+                    bot.mode(channel, True, 'o', user=selector_data[0])
+                    log.info('user %s autoopped on %s' % (user, channel))
+                if row[str('autovoice')]:
+                    bot.mode(channel, True, 'v', user=selector_data[0])
+                    log.info('user %s autovoiced on %s' % (user, channel))
 
         self._close_conn()
         log.debug('user %s updated' % (user))
