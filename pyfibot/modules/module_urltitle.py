@@ -96,6 +96,8 @@ def __get_age_str(published):
 
 
 def __get_views(views):
+    if int(views) == 0:
+        return '0'
     millnames = ['', 'k', 'M', 'Billion', 'Trillion']
     millidx = max(0, min(len(millnames) - 1, int(math.floor(math.log10(abs(views)) / 3.0))))
     return '%.0f%s' % (views / 10 ** (3 * millidx), millnames[millidx])
@@ -283,9 +285,7 @@ def _handle_iltalehti(url):
     bs = __get_bs(url)
     if not bs:
         return
-    title = bs.find('title').string
-    # The first part is the actual story title, lose the rest
-    title = title.split("|")[0].strip()
+    title = bs.find('meta', {'property': 'og:title'})['content']
     return title
 
 
@@ -294,7 +294,8 @@ def _handle_iltasanomat(url):
     bs = __get_bs(url)
     if not bs:
         return
-    title = bs.title.string.rsplit(" - ", 3)[0]
+    title = bs.find('meta', {'property': 'og:title'})['content']
+
     return title
 
 
@@ -492,7 +493,7 @@ def _handle_vimeo(url):
         info = r.json()[0]
         title = info['title']
         user = info['user_name']
-        likes = info['stats_number_of_likes']
+        likes = __get_views(info['stats_number_of_likes'])
         views = __get_views(info['stats_number_of_plays'])
 
         agestr = __get_age_str(datetime.strptime(info['upload_date'], '%Y-%m-%d %H:%M:%S'))
@@ -584,7 +585,7 @@ def _handle_mtv3(url):
     bs = __get_bs(url)
     if not bs:
         return
-    title = bs.find("h1", "entry-title").text
+    title = bs.find('meta', {'property': 'og:title'})['content']
     return title
 
 
@@ -593,8 +594,7 @@ def _handle_yle(url):
     bs = __get_bs(url)
     if not bs:
         return
-    title = bs.title.string
-    title = title.split("|")[0].strip()
+    title = bs.find('meta', {'property': 'og:title'})['content']
     return title
 
 
