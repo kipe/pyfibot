@@ -310,7 +310,7 @@ def _handle_verkkokauppa(url):
     except:
         price = "???€"
     try:
-        availability = bs.find('div', {'id': 'productAvailabilityInfo'}).next.next.text.strip()
+        availability = bs.find('div', {'id': 'productAvailabilityInfo'}).find('strong').text.strip()
     except:
         availability = ""
     return "%s | %s (%s)" % (product, price, availability)
@@ -633,86 +633,59 @@ def _handle_areena(url):
             return u'%i hours' % (dt.seconds / 3600)
         return u'%i minutes' % (dt.seconds / 60)
 
-    bs = __get_bs(url)
-    if not bs:
+    splitted = url.split('/')
+    # if "suora" found in url (and in the correct place),
+    # needs a bit more special handling as no api is available
+    if len(splitted) > 4 and splitted[4] == 'suora':
+        bs = __get_bs(url)
+        try:
+            container = bs.find('section', {'class': 'simulcast'})
+        except:
+            return
+        channel = container.find('a', {'class': 'active'}).text.strip()
+        return '%s (LIVE)' % (channel)
+
+    # create json_url from original url
+    json_url = '%s.json' % url.split('?')[0]
+    r = bot.get_url(json_url)
+
+    try:
+        data = r.json()
+    except:
+        log.debug("Couldn't parse JSON.")
         return
 
     try:
-        # handles single programs
-        if bs.find('article', {'class': 'program'}):
-            name = bs.find('article', {'class': 'program'}).find('h1').text.strip()
+        content_type = data['contentType']
+    except KeyError:
+        # there's no clear identifier for series
+        if 'episodeCountTotal' in data:
+            content_type = 'SERIES'
+        else:
+            # assume EPISODE
+            content_type = 'EPISODE'
 
-            try:
-                # duration needs some work, as the layout doesn't seem to be stable...
-                duration = bs.find('li', {'class': 'duration'}).find('span')
-                if duration.text.startswith('Kesto'):
-                    duration = bs.find('li', {'class': 'duration'})
-                    try:
-                        duration.span.decompose()
-                    except:
-                        pass
-                duration = duration.text.strip()
-            except:
-                try:
-                    duration = bs.find('span', {'id': 'duration'}).text.strip()
-                except:
-                    duration = '???'
+    try:
+        if content_type in ['EPISODE', 'CLIP']:
+            name = data['reportingTitle']
+            duration = __get_length_str(data['durationSec'])
+            broadcasted = __get_age_str(datetime.strptime(data['published'], '%Y-%m-%dT%H:%M:%S'))
+            if data['expires']:
+                expires = ' - exits in %s' % areena_get_exit_str(data['expires'])
+            else:
+                expires = ''
+            play_count = __get_views(data['playCount'])
+            return '%s [%s - %s plays - %s%s]' % (name, duration, play_count, broadcasted, expires)
 
-            try:
-                play_count = bs.find(attrs={'class': 'playCount'}).text.strip().split(' ')[0]
-            except:
-                play_count = '???'
-
-            try:
-                broadcasted = __get_age_str(
-                    datetime.strptime(
-                        bs.find('li', {'class': 'broadcasted'}).find('time')['datetime'],
-                        '%Y-%m-%dT%H:%M:%S'))
-            except:
-                broadcasted = '???'
-
-            try:
-                exits = areena_get_exit_str(bs.find('li', {'class': 'expires'}).find('time')['datetime'])
-            except:
-                return "%s [%s - %s plays - %s]" % (name, duration, play_count, broadcasted)
-
-            return "%s [%s - %s plays - %s - exits in %s]" % (name, duration, play_count, broadcasted, exits)
-
-        # handles series pages
-        elif bs.find('article', {'class': 'series'}):
-            name = bs.find('article', {'class': 'series'}).find('h1')
-            try:
-                # remove unwanted span, containing "Sarja" -label
-                name.span.decompose()
-            except:
-                pass
-            name = name.text.strip()
-
-            try:
-                # first try to get the number of episodes from the correct meta-field
-                episodes = bs.find('div', {'data-content': 'episodes'})['data-total']
-            except:
-                try:
-                    # if first try fails, try to get number of episodes
-                    # from "Series name (age rating) (number of episodes)" -tag
-                    episodes = re.findall(r'\d+', bs.find('section', {'class': 'episodes'}).find('h1').text)[-1]
-                except:
-                    episodes = '???'
-            try:
-                # get the latest episodes age
-                latest_episode = __get_age_str(
-                    datetime.strptime(
-                        bs.find('div', {'class': 'latest'}).find('time')['datetime'],
-                        '%Y-%m-%dT%H:%M:%S'))
-            except:
-                latest_episode = '???'
-
-            return "%s [SERIES - %s episodes - latest episode: %s]" % (name, episodes, latest_episode)
+        elif content_type == 'SERIES':
+            name = data['name']
+            episodes = data['episodeCountViewable']
+            latest_episode = __get_age_str(datetime.strptime(data['previousEpisode']['published'], '%Y-%m-%dT%H:%M:%S'))
+            return '%s [SERIES - %d episodes - latest episode: %s]' % (name, episodes, latest_episode)
     except:
-        pass
-    # fallback to original (stripped) title
-    title = bs.html.head.title.text.split(' | ')[0]
-    return title
+        # We want to exit cleanly, so it falls back to default url handler
+        log.debug('Unhandled error in Areena.')
+        return
 
 
 def _handle_wikipedia(url):
