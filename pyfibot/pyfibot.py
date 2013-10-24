@@ -231,10 +231,10 @@ class PyFiBotFactory(ThrottledClientFactory):
         g['isAdmin'] = self.isAdmin
         return g
 
-    def get_url(self, url, nocache=False, params=None, headers=None):
-        return self.getUrl(url, nocache, params, headers)
+    def get_url(self, url, nocache=False, params=None, headers=None, cookies=None):
+        return self.getUrl(url, nocache, params, headers, cookies)
 
-    def getUrl(self, url, nocache=False, params=None, headers=None):
+    def getUrl(self, url, nocache=False, params=None, headers=None, cookies=None):
         """Gets data, bs and headers for the given url, using the internal cache if necessary"""
 
         # TODO: Make this configurable in the config
@@ -248,6 +248,9 @@ class PyFiBotFactory(ThrottledClientFactory):
         # Custom headers from requester
         if headers:
             s.headers.update(headers)
+        # Custom cookies from requester
+        if cookies:
+            s.cookies.update(cookies)
 
         try:
             r = s.get(url, params=params)
