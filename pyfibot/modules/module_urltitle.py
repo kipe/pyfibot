@@ -160,15 +160,21 @@ def handle_url(bot, user, channel, url, msg):
         log.debug("No BS available, returning")
         return
 
-    title = bs.find('title')
-    # no title attribute
+    # Try and get title meant for social media first, it's usually fairly accurate
+    title = bs.find('meta', {'property': 'og:title'})
     if not title:
-        log.debug("No title found, returning")
-        return
+        title = bs.find('title')
+        # no title attribute
+        if not title:
+            log.debug("No title found, returning")
+            return
+        title = title.text
+    else:
+        title = title['content']
 
     try:
         # remove trailing spaces, newlines, linefeeds and tabs
-        title = title.string.strip()
+        title = title.strip()
         title = title.replace("\n", " ")
         title = title.replace("\r", " ")
         title = title.replace("\t", " ")
@@ -278,27 +284,6 @@ def _title(bot, channel, title, smart=False, prefix=None):
         return bot.say(channel, "%s %s [%s]" % (prefix, title, info))
 
 
-# TODO: Some handlers does not have if not bs: return, but why do we even have this for every function
-def _handle_iltalehti(url):
-    """*iltalehti.fi*html"""
-    # Go as normal
-    bs = __get_bs(url)
-    if not bs:
-        return
-    title = bs.find('meta', {'property': 'og:title'})['content']
-    return title
-
-
-def _handle_iltasanomat(url):
-    """*iltasanomat.fi*"""
-    bs = __get_bs(url)
-    if not bs:
-        return
-    title = bs.find('meta', {'property': 'og:title'})['content']
-
-    return title
-
-
 def _handle_verkkokauppa(url):
     """http://www.verkkokauppa.com/*/product/*"""
     bs = __get_bs(url)
@@ -314,16 +299,6 @@ def _handle_verkkokauppa(url):
     except:
         availability = ""
     return "%s | %s (%s)" % (product, price, availability)
-
-
-# TODO: Unit test
-def _handle_mol(url):
-    """http://www.mol.fi/paikat/Job.do?*"""
-    bs = __get_bs(url)
-    if not bs:
-        return
-    title = bs.find("div", {'class': 'otsikko'}).string
-    return title
 
 
 def _handle_tweet2(url):
@@ -462,19 +437,24 @@ def _handle_ircquotes(url):
 
 
 def _handle_alko2(url):
-    """http://alko.fi/tuotteet/fi/*"""
+    """http*://alko.fi/tuotteet/*"""
     return _handle_alko(url)
 
 
 def _handle_alko(url):
-    """http://www.alko.fi/tuotteet/fi/*"""
+    """http*://www.alko.fi/tuotteet/*"""
     bs = __get_bs(url)
     if not bs:
         return
-    name = bs.find('span', {'class': 'tuote_otsikko'}).string
-    price = bs.find('span', {'class': 'tuote_hinta'}).string.split(" ")[0] + u"€"
-    drinktype = bs.find('span', {'class': 'tuote_tyyppi'}).next
-    return name + " - " + drinktype + " - " + price
+    name = bs.find('h1', {'itemprop': 'name'}).text
+    price = float(bs.find('span', {'itemprop': 'price'}).text.replace(',', '.'))
+    bottle_size = float(bs.find('div', {'class': 'product-details'}).contents[0].strip().replace(',', '.'))
+    e_per_l = float(bs.find('div', {'class': 'product-details'}).contents[4].strip().replace(',', '.'))
+    drinktype = bs.find('h3', {'itemprop': 'category'}).text
+    alcohol_content = bs.find('td', {'class': 'label'}, text='Alkoholi:') \
+        .parent.find_all('td')[-1].text.strip().replace(',', '.').replace(' ', '')
+
+    return '%s [%.2fe, %.2fl, %.2fe/l, %s, %s]' % (name, price, bottle_size, e_per_l, drinktype, alcohol_content)
 
 
 def _handle_salakuunneltua(url):
@@ -549,62 +529,6 @@ def _handle_reddit(url):
     except:
         # parsing error, use default title
         return
-
-
-def _handle_hs(url):
-    """*hs.fi*artikkeli*"""
-    bs = __get_bs(url)
-    if not bs:
-        return
-    title = bs.title.string
-    title = title.split("-")[0].strip()
-    try:
-        # determine article age and warn if it is too old
-        # handle updated news items of format, and get the latest update stamp
-        # 20.7.2010 8:02 | PÃ¤ivitetty: 20.7.2010 12:53
-        date = bs.find('p', {'class': 'date'}).next
-        # in case hs.fi changes the date format, don't crash on it
-        if date:
-            date = date.split("|")[0].strip()
-            article_date = datetime.strptime(date, "%d.%m.%Y %H:%M")
-            delta = datetime.now() - article_date
-
-            if delta.days > 365:
-                return title, "NOTE: Article is %d days old!" % delta.days
-            else:
-                return title
-        else:
-            return title
-    except Exception, e:
-        log.error("Error when parsing hs.fi: %s" % e)
-        return title
-
-
-def _handle_mtv3(url):
-    """*mtv3.fi*"""
-    bs = __get_bs(url)
-    if not bs:
-        return
-    title = bs.find('meta', {'property': 'og:title'})['content']
-    return title
-
-
-def _handle_yle(url):
-    """http://*yle.fi/uutiset/*"""
-    bs = __get_bs(url)
-    if not bs:
-        return
-    title = bs.find('meta', {'property': 'og:title'})['content']
-    return title
-
-
-def _handle_varttifi(url):
-    """http://www.vartti.fi/artikkeli/*"""
-    bs = __get_bs(url)
-    if not bs:
-        return
-    title = bs.find("h2").string
-    return title
 
 
 def _handle_aamulehti(url):
@@ -690,6 +614,11 @@ def _handle_areena(url):
 
 def _handle_wikipedia(url):
     """*wikipedia.org*"""
+    def get_redirect(content):
+        if 'REDIRECT' in content or '<li>redirect' in content:
+            return True
+        return False
+
     params = {
         'format': 'json',
         'action': 'parse',
@@ -710,7 +639,10 @@ def _handle_wikipedia(url):
     except KeyError:
         return
 
-    if 'REDIRECT' in content:
+    # index to keep track of redirections
+    redirection_index = 0
+    # loop while we get a redirection
+    while get_redirect(content):
         try:
             params['page'] = BeautifulSoup(content).find('li').find('a').get('href').split('/')[-1]
         except:
@@ -719,6 +651,11 @@ def _handle_wikipedia(url):
         try:
             content = r.json()['parse']['text']['*']
         except KeyError:
+            return
+        # increase redirection index and if it seems like we're in endless loop,
+        # fall back to default handler
+        redirection_index += 1
+        if redirection_index > 5:
             return
 
     if not content:
@@ -932,6 +869,7 @@ def _handle_dailymotion(url):
     except:
         return
 
+
 def _handle_dealextreme(url):
     """http*://dx.com/p/*"""
     sku = url.split('?')[0].split('-')[-1]
@@ -946,7 +884,7 @@ def _handle_dealextreme(url):
         log.debug('DX.com API error.')
         return
 
-    if 'success' not in data or data['success'] != True:
+    if 'success' not in data or data['success'] is not True:
         log.debug('DX.com unsuccessful')
         return
 
@@ -963,6 +901,7 @@ def _handle_dealextreme(url):
         stars = "[%-5s]" % (product['avgRating'] * "*")
         return '%s [%.2fe - %s - %i reviews]' % (name, price, stars, reviews)
     return '%s [%.2fe]' % (name, price)
+
 
 def _handle_dealextreme_www(url):
     """http*://www.dx.com/p/*"""
