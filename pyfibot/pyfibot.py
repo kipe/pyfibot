@@ -229,6 +229,8 @@ class PyFiBotFactory(ThrottledClientFactory):
         g['getIdent'] = self.getIdent
         g['getHost'] = self.getHost
         g['isAdmin'] = self.isAdmin
+        g['to_utf8'] = self.to_utf8
+        g['to_unicode'] = self.to_unicode
         return g
 
     def get_url(self, url, nocache=False, params=None, headers=None, cookies=None):
@@ -297,6 +299,24 @@ class PyFiBotFactory(ThrottledClientFactory):
             if fnmatch.fnmatch(user, pattern):
                 return True
         return False
+
+    def to_utf8(self, _string):
+        """Convert string to UTF-8 if it is unicode"""
+        if isinstance(_string, unicode):
+            _string = _string.encode("UTF-8")
+        return _string
+
+    def to_unicode(self, _string):
+        """Convert string to UTF-8 if it is unicode"""
+        if not isinstance(_string, unicode):
+            try:
+                _string = unicode(_string)
+            except:
+                try:
+                    _string = _string.decode('utf-8')
+                except:
+                    _string = _string.decode('iso-8859-1')
+        return _string
 
 
 def init_logging(config):
