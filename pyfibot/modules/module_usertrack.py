@@ -148,7 +148,7 @@ class UserSQL:
         # Seems like needs a working whois, as botcore.userKicked receives only nick from kickee
         # Kicker however is an user -object...
         now = datetime.now()
-        selector, selector_data = self._get_user_selector(user)
+        selector, selector_data = self._get_user_selector(kickee)
         # can't create user
         self._get_conn(channel)
         event = 'kicked by %s [%s]' % (kicker, message)
