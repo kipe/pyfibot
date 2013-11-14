@@ -932,7 +932,7 @@ def _handle_ebay(url):
 
     try:
         if item['QuantityAvailableHint'] == 'MoreThan':
-            availability = '>%i available' % item['QuantityThreshold']
+            availability = 'over %i available' % item['QuantityThreshold']
         else:
             availability = '%d available' % item['QuantityThreshold']
         return '%s [%s - %s - ships from %s%s]' % (name, price, availability, location, ended)
@@ -944,6 +944,13 @@ def _handle_ebay(url):
 def _handle_ebay_no_prefix(url):
     """http*://ebay.*/itm/*"""
     return _handle_ebay(url)
+
+
+def _handle_ebay_cgi(url):
+    """http*://cgi.ebay.*/ws/eBayISAPI.dll?ViewItem&item=*"""
+    item_id = url.split('item=')[1].split('&')[0]
+    fake_url = 'http://ebay.com/itm/%s' % item_id
+    return _handle_ebay(fake_url)
 
 
 def _handle_dealextreme(url):
