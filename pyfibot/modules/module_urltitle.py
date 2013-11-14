@@ -46,7 +46,7 @@ def __get_bs(url):
     if not r:
         return None
 
-    duration = (end-start).seconds
+    duration = (end - start).seconds
     if duration > TITLE_LAG_MAXIMUM:
         log.error("Fetching title took %d seconds, not displaying title" % duration)
         return None
@@ -317,7 +317,7 @@ def _handle_tweet(url):
     if not bearer_token:
         log.info("Use util/twitter_application_auth.py to request a bearer token for tweet handling")
         return
-    headers = {'Authorization': 'Bearer '+bearer_token}
+    headers = {'Authorization': 'Bearer ' + bearer_token}
 
     data = bot.get_url(infourl, headers=headers)
 
@@ -878,6 +878,72 @@ def _handle_dailymotion(url):
         return "%s by %s [%s - %s - %s views - %s%s]" % (r['title'], r['owner.screenname'], lengthstr, stars, views, agestr, adult)
     except:
         return
+
+
+def _handle_ebay(url):
+    """http*://*.ebay.*/itm/*"""
+    try:
+        item_id = url.split('/')[-1].split('?')[0]
+    except IndexError:
+        log.debug("Couldn't find item ID.")
+        return
+
+    app_id = config.get('ebay_appid', 'RikuLind-3b6d-4c30-937c-6e7d87b5d8be')
+    # 77 == Germany, prices in EUR
+    site_id = config.get('ebay_siteid', 77)
+    currency = config.get('ebay_currency', 'e')
+
+    api_url = 'http://open.api.ebay.com/shopping'
+    params = {
+        'callname': 'GetSingleItem',
+        'responseencoding': 'JSON',
+        'appid': app_id,
+        'siteid': site_id,
+        'version': 515,
+        'ItemID': item_id,
+        'IncludeSelector': 'ShippingCosts'
+    }
+
+    r = bot.get_url(api_url, params=params)
+    # if status_code != 200 or Ack != 'Success', something went wrong and data couldn't be found.
+    if r.status_code != 200 or r.json()['Ack'] != 'Success':
+        log.debug("eBay: data couldn't be fetched.")
+        return
+
+    item = r.json()['Item']
+
+    name = item['Title']
+    # ConvertedCurrentPrice holds the value of item in currency determined by site id
+    price = item['ConvertedCurrentPrice']['Value']
+    location = '%s, %s' % (item['Location'], item['Country'])
+
+    ended = ''
+    if item['ListingStatus'] != 'Active':
+        ended = ' - ENDED'
+
+    if 'ShippingCostSummary' in item and \
+       'ShippingServiceCost' in item['ShippingCostSummary'] and \
+       item['ShippingCostSummary']['ShippingServiceCost']['Value'] != 0:
+            price = '%.1f%s (postage %.1f%s)' % (
+                price, currency,
+                item['ShippingCostSummary']['ShippingServiceCost']['Value'], currency)
+    else:
+        price = '%.1f%s' % (price, currency)
+
+    try:
+        if item['QuantityAvailableHint'] == 'MoreThan':
+            availability = '>%i available' % item['QuantityThreshold']
+        else:
+            availability = '%d available' % item['QuantityThreshold']
+        return '%s [%s - %s - ships from %s%s]' % (name, price, availability, location, ended)
+    except KeyError:
+        log.debug('eBay: quantity available not be found.')
+        return '%s [%s - ships from %s%s]' % (name, price, location, ended)
+
+
+def _handle_ebay_no_prefix(url):
+    """http*://ebay.*/itm/*"""
+    return _handle_ebay(url)
 
 
 def _handle_dealextreme(url):
