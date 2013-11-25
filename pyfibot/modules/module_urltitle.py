@@ -642,7 +642,6 @@ def _handle_wikipedia(url):
         page = bot.to_unicode(urlparse.unquote(url.split('/')[-1]))
         if page.startswith('index.php') and 'title' in page:
             page = page.split('?title=')[1]
-        print(page)
         return page
 
     def get_content(url):
@@ -1006,3 +1005,34 @@ def _handle_dealextreme(url):
 def _handle_dealextreme_www(url):
     """http*://www.dx.com/p/*"""
     return _handle_dealextreme(url)
+
+
+def _handle_instagram(url):
+    """http*://instagram.com/p/*"""
+    from instagram.client import InstagramAPI
+
+    CLIENT_ID = '879b81dc0ff74f179f5148ca5752e8ce'
+
+    api = InstagramAPI(client_id=CLIENT_ID)
+
+    # todo: instagr.am
+    m = re.search('instagram\.com/p/([^/]+)/', url)
+    if not m:
+        return
+
+    shortcode = m.group(1)
+
+    r = bot.get_url("http://api.instagram.com/oembed?url=http://instagram.com/p/%s/" % shortcode)
+
+    media = api.media(r.json()['media_id'])
+
+    # media type video/image?
+    # age/date? -> media.created_time  # (datetime object)
+
+    # full name = username for some users, don't bother displaying both
+    if media.user.full_name != media.user.username:
+        user = "%s (%s)" % (media.user.full_name, media.user.username)
+    else:
+        user = media.user.username
+
+    return "%s: %s [%d likes, %d comments]" % (user, media.caption.text, media.like_count, media.comment_count)
