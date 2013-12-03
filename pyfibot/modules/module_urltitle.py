@@ -22,6 +22,7 @@ from bs4 import BeautifulSoup
 log = logging.getLogger("urltitle")
 config = None
 bot = None
+handlers = []
 
 TITLE_LAG_MAXIMUM = 10
 
@@ -34,8 +35,11 @@ CACHE_ENABLED = True
 def init(botref):
     global config
     global bot
+    global handlers
     bot = botref
     config = bot.config.get("module_urltitle", {})
+    # load handlers in init, as the data doesn't change between rehashes anyways
+    handlers = [(h, ref) for h, ref in globals().items() if h.startswith("_handle_")]
 
 
 def __get_bs(url):
@@ -79,7 +83,16 @@ def __get_length_str(secs):
 
 
 def __get_age_str(published):
-    age = datetime.now() - published
+    now = datetime.now()
+
+    # Check if the publish date is in the future (upcoming episode)
+    if published > now:
+        age = published - now
+        future = True
+    else:
+        age = now - published
+        future = False
+
     halfyears, days = age.days // 182, age.days % 365
     agestr = []
     years = halfyears * 0.5
@@ -90,7 +103,7 @@ def __get_age_str(published):
         agestr.append("%dd" % days)
     # complete the age string
     if agestr and days != 0:
-        agestr.append(" ago")
+        agestr.append(" from now" if future else " ago")
     elif years == 0 and days == 0:  # uploaded TODAY, whoa.
         agestr.append("FRESH")
     else:
@@ -157,13 +170,15 @@ def handle_url(bot, user, channel, url, msg):
             log.debug("Cache hit")
             return _title(bot, channel, title, True)
 
+    global handlers
     # try to find a specific handler for the URL
-    handlers = [(h, ref) for h, ref in globals().items() if h.startswith("_handle_")]
-
     for handler, ref in handlers:
         pattern = ref.__doc__.split()[0]
         if fnmatch.fnmatch(url, pattern):
             title = ref(url)
+            if title is False:
+                log.debug("Title disabled by handler.")
+                return
             if title:
                 cache.put(url, title)
                 # handler found, abort
@@ -475,27 +490,29 @@ def _handle_alko(url):
 
 def _handle_salakuunneltua(url):
     """*salakuunneltua.fi*"""
-    return None
+    return False
 
 
 def _handle_vimeo(url):
     """*vimeo.com/*"""
     data_url = "http://vimeo.com/api/v2/video/%s.json"
-    match = re.match("http://.*?vimeo.com/(\d+)", url)
-    if match:
-        # Title: CGoY Sharae Spears  Milk shower by miletoo [3m1s - [*****] - 158k views - 313d ago - XXX]
-        infourl = data_url % match.group(1)
-        r = bot.get_url(infourl)
-        info = r.json()[0]
-        title = info['title']
-        user = info['user_name']
-        likes = __get_views(info['stats_number_of_likes'])
-        views = __get_views(info['stats_number_of_plays'])
+    match = re.match("http(s?)://.*?vimeo.com/(\d+)", url)
+    if not match:
+        return None
 
-        agestr = __get_age_str(datetime.strptime(info['upload_date'], '%Y-%m-%d %H:%M:%S'))
-        lengthstr = __get_length_str(info['duration'])
+    # Title: CGoY Sharae Spears  Milk shower by miletoo [3m1s - [*****] - 158k views - 313d ago - XXX]
+    infourl = data_url % match.group(2)
+    r = bot.get_url(infourl)
+    info = r.json()[0]
+    title = info['title']
+    user = info['user_name']
+    likes = __get_views(info.get('stats_number_of_likes', 0))
+    views = __get_views(info.get('stats_number_of_plays', 0))
 
-        return "%s by %s [%s - %s likes - %s views - %s]" % (title, user, lengthstr, likes, views, agestr)
+    agestr = __get_age_str(datetime.strptime(info['upload_date'], '%Y-%m-%d %H:%M:%S'))
+    lengthstr = __get_length_str(info['duration'])
+
+    return "%s by %s [%s - %s likes - %s views - %s]" % (title, user, lengthstr, likes, views, agestr)
 
 
 def _handle_stackoverflow(url):
@@ -558,7 +575,7 @@ def _handle_aamulehti(url):
 
 def _handle_apina(url):
     """http://apina.biz/*"""
-    return None
+    return False
 
 
 def _handle_areena(url):
@@ -1036,3 +1053,96 @@ def _handle_instagram(url):
         user = media.user.username
 
     return "%s: %s [%d likes, %d comments]" % (user, media.caption.text, media.like_count, media.comment_count)
+
+
+def _handle_github(url):
+    """http*://*github.com*"""
+    return False
+
+
+def fetch_nettiX(url, fields_to_fetch):
+    '''
+    Creates a title for NettiX -services.
+    Uses the mobile site, so at the moment of writing fetching data from
+    NettiAsunto and NettiMökki isn't possible.
+
+    All handlers must be implemented elsewhere, this only provides a constant
+    function to fetch the data (and creates an uniform title).
+    '''
+
+    # Strip useless stuff from url
+    site = re.split('https?\:\/\/(www.)?(m.)?', url)[-1]
+    # Fetch BS from mobile site, as it's a lot easier to parse
+    bs = __get_bs('http://m.%s' % site)
+    if not bs:
+        return
+
+    # Find "main name" for the item
+    try:
+        main = bs.find('div', {'class': 'fl'}).find('b').text.strip()
+    except AttributeError:
+        # If not found, probably doesn't work -> fallback to default
+        return
+    if not main:
+        return
+
+    fields = []
+
+    try:
+        # Try to find price for the item, if found -> add to fields
+        price = bs.find('div', {'class': 'pl10 mt10 lnht22'}).find('span').text.strip()
+        if price:
+            fields.append(price)
+    except AttributeError:
+        pass
+
+    # All sites have the same basic structure, find the "data" table
+    ad_info = bs.find('div', {'class': 'ad_info'})
+    if ad_info:
+        for f in ad_info.findAll('li'):
+            # Get field name
+            field = f.text.split(':')[0]
+            # If the name was found and it's in fields_to_fetch
+            if field and field in fields_to_fetch:
+                # Remove spans
+                # For example cars might have registeration date includet in a span
+                [s.extract() for s in f.findAll('span')]
+                # The "main data" is always in a "b" element
+                field_info = f.find('b').text.strip()
+                # If the data was found and it's not "Ei ilmoitettu", add to fields
+                if field_info and field_info != 'Ei ilmoitettu':
+                    fields.append(field_info)
+
+    if fields:
+        return '%s [%s]' % (main, ', '.join(fields))
+    return '%s' % (main)
+
+
+def _handle_nettiauto(url):
+    """http*://*nettiauto.com/*/*/*"""
+    return fetch_nettiX(url, ['Vuosimalli', 'Mittarilukema', 'Moottori', 'Vaihteisto', 'Vetotapa'])
+
+
+def _handle_nettivene(url):
+    """http*://*nettivene.com/*/*/*"""
+    return fetch_nettiX(url, ['Vuosimalli', 'Runkomateriaali', 'Pituus', 'Leveys'])
+
+
+def _handle_nettimoto(url):
+    """http*://*nettimoto.com/*/*/*"""
+    return fetch_nettiX(url, ['Vuosimalli', 'Moottorin tilavuus', 'Mittarilukema', 'Tyyppi'])
+
+
+def _handle_nettikaravaani(url):
+    """http*://*nettikaravaani.com/*/*/*"""
+    return fetch_nettiX(url, ['Vm./Rek. vuosi', 'Mittarilukema', 'Moottori', 'Vetotapa'])
+
+
+def _handle_nettivaraosa(url):
+    """http*://*nettivaraosa.com/*/*"""
+    return fetch_nettiX(url, ['Varaosan osasto'])
+
+
+def _handle_nettikone(url):
+    """http*://*nettikone.com/*/*/*"""
+    return fetch_nettiX(url, ['Vuosimalli', 'Osasto', 'Moottorin tilavuus', 'Mittarilukema', 'Polttoaine'])
