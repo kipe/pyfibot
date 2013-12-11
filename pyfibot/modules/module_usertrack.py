@@ -12,15 +12,29 @@ db = dataset.connect('sqlite:///databases/usertrack.db')
 
 
 def get_table(bot, channel):
+    ''' Returns table-instance from database.
+    Database names are in format "networkalias_channel".
+    Network alias is the name assigned to network in config.
+    Channel is stripped from the &#!+ prepending the channel name. '''
+
     return db['%s_%s' % (bot.network.alias, re.sub(r'&|#|!|\+', '', channel))]
 
 
 def upsert_row(bot, channel, data, keys=['nick', 'ident', 'host']):
+    ''' Updates row to database.
+    Default keys are nick, ident and host,
+    which are normally present for data received by get_base_data -function. '''
+
     table = get_table(bot, channel)
     table.upsert(data, keys)
 
 
 def get_base_data(user):
+    ''' Fetches "base" data according to user.
+    Normally this is nick, ident, host and current time to be set to action_time in database.
+    Ident and host might be missing when the full mask isn't provided,
+    for example in handle_userKicked, where kickee doesn't get anything but name. '''
+
     data = {
         'nick': getNick(user),
         'action_time': datetime.now()
@@ -40,7 +54,14 @@ def get_base_data(user):
 
 
 def handle_privmsg(bot, user, channel, message):
-    # if user == channel -> this is a query -> don't log
+    ''' Handles all messages bot sees.
+    If message is private message to bot, doesn't update.
+    Otherwise updates the DB.
+    - last_action = 'message'
+    - last_message = message
+    - message_time = current time '''
+
+    # if user == channel -> this is a query -> don't update
     if user == channel:
         return
 
@@ -53,6 +74,9 @@ def handle_privmsg(bot, user, channel, message):
 
 
 def handle_userJoined(bot, user, channel):
+    ''' Handles user joining the channel and auto-ops if op == True in database.
+    - last_action = 'join' '''
+
     data = get_base_data(user)
     data['last_action'] = 'join'
 
@@ -65,6 +89,11 @@ def handle_userJoined(bot, user, channel):
 
 
 def handle_userLeft(bot, user, channel, message):
+    ''' Handles user leaving the channel (or quitting).
+    For leaving, only updates the channel left.
+    For quitting, updates all channels in network, which the user was on (as bot knows...)
+    - last_action = 'left' '''
+
     data = get_base_data(user)
     data['last_message'] = message
     if channel is not None:
@@ -84,6 +113,13 @@ def handle_userLeft(bot, user, channel, message):
 
 
 def handle_userKicked(bot, kickee, channel, kicker, message):
+    ''' Handles user being kicked.
+    As 'kickee' doesn't get full mask, it's only determined by nick.
+    For kickee:
+        - last_action = kicked by kicker [message]
+    For kicker:
+        - last_action = kicked kickee [message] '''
+
     data = get_base_data(kickee)
     data['last_action'] = 'kicked by %s [%s]' % (getNick(kicker), message)
     # We don't get full info from kickee, need to update by nick only
@@ -96,6 +132,10 @@ def handle_userKicked(bot, kickee, channel, kicker, message):
 
 
 def handle_userRenamed(bot, user, newnick):
+    ''' Handles nick change.
+    Updates both data, related to old and new nick, doesn't remove anything from db.
+    - last_action = nick change from oldnick to newnick '''
+
     nick = getNick(user)
     ident = getIdent(user)
     host = getHost(user)
@@ -127,6 +167,11 @@ def handle_userRenamed(bot, user, newnick):
 
 
 def handle_action(bot, user, channel, message):
+    ''' Handles action (/me etc). Ignores stuff directed to bot (/describe botnick etc).
+    - last_action = action
+    - last_message = message
+    - message_time = current time '''
+
     # if action is directed to bot instead of channel -> don't log
     if channel == bot.nickname:
         return
@@ -140,10 +185,14 @@ def handle_action(bot, user, channel, message):
 
 
 def command_add_op(bot, user, channel, args):
+    ''' Adds op-status according to nickname. Only for admins.
+    If user is found from database, set op = True and return info with full hostmask.
+    Else returns user not found. '''
+
     if not isAdmin(user) or user == channel or not args:
         return
 
-    nick = args
+    nick = args.strip()
 
     table = get_table(bot, channel)
     res = table.find_one(nick=nick)
@@ -156,10 +205,12 @@ def command_add_op(bot, user, channel, args):
 
 
 def command_remove_op(bot, user, channel, args):
+    ''' Removes op-status from nick. Logic same as command_add_op. Only for admins. '''
+
     if not isAdmin(user) or user == channel or not args:
         return
 
-    nick = args
+    nick = args.strip()
 
     table = get_table(bot, channel)
     res = table.find_one(nick=nick)
@@ -172,6 +223,8 @@ def command_remove_op(bot, user, channel, args):
 
 
 def command_op(bot, user, channel, args):
+    ''' Ops user if op = True for user or isAdmin. '''
+
     table = get_table(bot, channel)
     if table.find_one(nick=getNick(user), ident=getIdent(user), host=getHost(user), op=True) or isAdmin(user):
         log.info('opping %s on %s by request' % (user, channel))
@@ -179,12 +232,62 @@ def command_op(bot, user, channel, args):
 
 
 def command_list_ops(bot, user, channel, args):
+    ''' Lists ops in current channel. Only for admins.
+    By default lists nicks, if args == 'full', lists full hostmask. '''
+
     if not isAdmin(user) or user == channel:
         return
 
     table = get_table(bot, channel)
-    if args == 'full':
+    if args.strip() == 'full':
         ops = ', '.join(['%s!%s@%s' % (r['nick'], r['ident'], r['host']) for r in table.find(op=True)])
     else:
         ops = ', '.join(['%s' % r['nick'] for r in table.find(op=True)])
     return bot.say(channel, 'ops: %s' % ops)
+
+
+def __get_length_str(secs):
+    days, hours, minutes, seconds = secs // 86400, secs // 3600, secs // 60 % 60, secs % 60
+
+    if days > 0:
+        return '%dd' % days
+    if hours > 0:
+        return '%dh' % hours
+    if minutes > 0:
+        return '%dm' % minutes
+    if seconds > 0:
+        return '%ds' % seconds
+    return '0s'
+
+
+def command_seen(bot, user, channel, args):
+    '''Displays the last action by the given user'''
+    table = get_table(bot, channel)
+
+    # Return the first match, there shouldn't be multiples anyway
+    user = table.find_one(nick=args)
+    if not user:
+        return bot.say(channel, "I haven't seen %s on %s" % (args, channel))
+
+    # Calculate last seen in seconds
+    last_seen = datetime.now() - user['message_time']
+    # Get string for last seen
+    last_seen = __get_length_str(last_seen.days * 86400 + last_seen.seconds)
+
+    # If the last action was part or quit, show also the message
+    if user['last_action'] in ['left', 'quit']:
+        return bot.say(channel, "%s was last seen at %s (%s ago) [%s, %s]" %
+                       (user['nick'],
+                        '{0:%Y-%m-%d %H:%M:%S}'.format(user['message_time']),
+                        last_seen,
+                        user['last_action'],
+                        user['last_message']
+                        ))
+
+    # Otherwise just show the time and action
+    return bot.say(channel, "%s was last seen at %s (%s ago) [%s]" %
+                   (user['nick'],
+                    '{0:%Y-%m-%d %H:%M:%S}'.format(user['message_time']),
+                    last_seen,
+                    user['last_action']
+                    ))
