@@ -83,10 +83,6 @@ def command_weather(bot, user, channel, args):
     return bot.say(channel, text)
 
 
-def command_saa(bot, user, channel, args):
-    return command_weather(bot, user, channel, args)
-
-
 def command_forecast(bot, user, channel, args):
     global default_location
     if args:
