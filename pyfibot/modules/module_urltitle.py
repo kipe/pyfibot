@@ -64,8 +64,7 @@ def __get_bs(url):
     content = r.content
     if content:
         return BeautifulSoup(content)
-    else:
-        return None
+    return None
 
 
 def __get_length_str(secs):
@@ -1023,7 +1022,7 @@ def _handle_instagram(url):
     api = InstagramAPI(client_id=CLIENT_ID)
 
     # todo: instagr.am
-    m = re.search('instagram\.com/p/([^/]+)/', url)
+    m = re.search('instagram\.com/p/([^/]+)', url)
     if not m:
         return
 
@@ -1032,6 +1031,8 @@ def _handle_instagram(url):
     r = bot.get_url("http://api.instagram.com/oembed?url=http://instagram.com/p/%s/" % shortcode)
 
     media = api.media(r.json()['media_id'])
+
+    print(media)
 
     # media type video/image?
     # age/date? -> media.created_time  # (datetime object)
@@ -1042,7 +1043,10 @@ def _handle_instagram(url):
     else:
         user = media.user.full_name
 
-    return "%s: %s [%d likes, %d comments]" % (user, media.caption.text, media.like_count, media.comment_count)
+    if media.caption:
+        return "%s: %s [%d likes, %d comments]" % (user, media.caption.text, media.like_count, media.comment_count)
+    else:
+        return "%s [%d likes, %d comments]" % (user, media.like_count, media.comment_count)
 
 
 def fetch_nettiX(url, fields_to_fetch):
@@ -1131,6 +1135,57 @@ def _handle_nettivaraosa(url):
 def _handle_nettikone(url):
     """http*://*nettikone.com/*/*/*"""
     return fetch_nettiX(url, ['Vuosimalli', 'Osasto', 'Moottorin tilavuus', 'Mittarilukema', 'Polttoaine'])
+
+
+def _handle_hitbox(url):
+    """http*://*hitbox.tv/*"""
+
+    '''
+    Fetch hitbox.tv stream title from hitbox api.
+    Webpages are done in angularJS so you can't fetch the title with
+    generic handler.
+    '''
+
+    streamname = url.rsplit('/', 2)[2]
+    api_url = 'http://api.hitbox.tv/media/live/%s' % streamname
+
+    r = bot.get_url(api_url)
+
+    try:
+        data = r.json()
+    except:
+        log.debug('can\'t parse, probably wrong stream name')
+        return 'Stream not found.'
+
+    hitboxname = data['livestream'][0]['media_display_name']
+    streamtitle = data['livestream'][0]['media_status']
+    streamgame = data['livestream'][0]['category_name_short']
+    streamlive = data['livestream'][0]['media_is_live']
+
+    if streamgame is None:
+        streamgame = ''
+    else:
+        streamgame = '[%s] ' % (streamgame)
+
+    if streamlive == '1':
+        return '%s%s - %s - LIVE' % (streamgame, hitboxname, streamtitle)
+    else:
+        return '%s%s - %s - OFFLINE' % (streamgame, hitboxname, streamtitle)
+
+    return False
+
+
+def _handle_poliisi(url):
+    """http*://*poliisi.fi/poliisi/*"""
+    bs = __get_bs(url)
+    # If there's no BS, the default handler can't get it either...
+    if not bs:
+        return False
+
+    try:
+        return bs.find('div', {'id': 'contentbody'}).find('h1').text.strip()
+    except AttributeError:
+        return False
 
 
 # IGNORED TITLES
