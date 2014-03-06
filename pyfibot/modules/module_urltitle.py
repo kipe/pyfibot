@@ -67,6 +67,18 @@ def __get_bs(url):
     return None
 
 
+def __get_title_tag(url):
+    bs = __get_bs(url)
+    if not bs:
+        return False
+
+    title = bs.find('title')
+    if not title:
+        return
+
+    return title.text
+
+
 def __get_length_str(secs):
     lengthstr = []
     hours, minutes, seconds = secs // 3600, secs // 60 % 60, secs % 60
@@ -178,10 +190,16 @@ def handle_url(bot, user, channel, url, msg):
             if title is False:
                 log.debug("Title disabled by handler.")
                 return
-            if title:
+            elif title is None:
+                # Handler found, but suggests using the default title instead
+                break
+            elif title:
                 cache.put(url, title)
                 # handler found, abort
                 return _title(bot, channel, title, True)
+            else:
+                # No specific handler, use generic
+                pass
 
     log.debug("No specific handler found, using generic")
     # Fall back to generic handler
@@ -1140,39 +1158,43 @@ def _handle_nettikone(url):
 def _handle_hitbox(url):
     """http*://*hitbox.tv/*"""
 
-    '''
-    Fetch hitbox.tv stream title from hitbox api.
-    Webpages are done in angularJS so you can't fetch the title with
-    generic handler.
-    '''
+   # Blog and Help subdomains aren't implemented in Angular JS and works fine with default handler
+    if re.match("http://(help|blog)\.hitbox\.tv/.*", url):
+        return
 
-    streamname = url.rsplit('/', 2)[2]
-    api_url = 'http://api.hitbox.tv/media/live/%s' % streamname
+    # Hitbox titles are populated by JavaScript so they return a useless "{{meta.title}}", don't show those
+    elif not re.match("http://(www\.)?hitbox\.tv/([a-z0-9]+)$", url):
+        return False
 
-    r = bot.get_url(api_url)
-
-    try:
-        data = r.json()
-    except:
-        log.debug('can\'t parse, probably wrong stream name')
-        return 'Stream not found.'
-
-    hitboxname = data['livestream'][0]['media_display_name']
-    streamtitle = data['livestream'][0]['media_status']
-    streamgame = data['livestream'][0]['category_name_short']
-    streamlive = data['livestream'][0]['media_is_live']
-
-    if streamgame is None:
-        streamgame = ''
+    # For actual stream pages, let's fetch information via the hitbox API
     else:
-        streamgame = '[%s] ' % (streamgame)
+        streamname = url.rsplit('/', 2)[2]
+        api_url = 'http://api.hitbox.tv/media/live/%s' % streamname
 
-    if streamlive == '1':
-        return '%s%s - %s - LIVE' % (streamgame, hitboxname, streamtitle)
-    else:
-        return '%s%s - %s - OFFLINE' % (streamgame, hitboxname, streamtitle)
+        r = bot.get_url(api_url)
 
-    return False
+        try:
+            data = r.json()
+        except:
+            log.debug('can\'t parse, probably wrong stream name')
+            return 'Stream not found.'
+
+        hitboxname = data['livestream'][0]['media_display_name']
+        streamtitle = data['livestream'][0]['media_status']
+        streamgame = data['livestream'][0]['category_name_short']
+        streamlive = data['livestream'][0]['media_is_live']
+
+        if streamgame is None:
+            streamgame = ""
+        else:
+            streamgame = '[%s] ' % (streamgame)
+
+        if streamlive == '1':
+            return '%s%s - %s - LIVE' % (streamgame, hitboxname, streamtitle)
+        else:
+            return '%s%s - %s - OFFLINE' % (streamgame, hitboxname, streamtitle)
+
+        return False
 
 
 def _handle_poliisi(url):
@@ -1188,6 +1210,16 @@ def _handle_poliisi(url):
         return False
 
 
+def _handle_github(url):
+    """http*://*github.com*"""
+    return __get_title_tag(url)
+
+
+def _handle_gitio(url):
+    """http*://git.io*"""
+    return __get_title_tag(url)
+
+
 # IGNORED TITLES
 def _handle_salakuunneltua(url):
     """*salakuunneltua.fi*"""
@@ -1196,16 +1228,6 @@ def _handle_salakuunneltua(url):
 
 def _handle_apina(url):
     """http://apina.biz/*"""
-    return False
-
-
-def _handle_github(url):
-    """http*://*github.com*"""
-    return False
-
-
-def _handle_gitio(url):
-    """http*://git.io/*"""
     return False
 
 
