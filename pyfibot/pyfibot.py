@@ -429,7 +429,7 @@ def main():
     for network, settings in config['networks'].items():
         # settings = per network, config = global
         nick = settings.get('nick', None) or config['nick']
-        linerate = settings.get('linerate', None) or config.get('linerate', None)
+        linerate = settings.get('linerate', 0.5) or config.get('linerate', 0.5)
         password = settings.get('password', None)
         is_ssl = bool(settings.get('is_ssl', False))
         port = int(settings.get('port', 6667))
@@ -437,10 +437,14 @@ def main():
 
         # normalize channel names to prevent internal confusion
         chanlist = []
-        for channel in settings['channels']:
-            if channel[0] not in '&#!+':
-                channel = '#' + channel
-            chanlist.append(channel)
+        # allow bot to connect even if no channels are declared
+        if 'channels' in settings:
+            for channel in settings['channels']:
+                if channel[0] not in '&#!+':
+                    channel = '#' + channel
+                chanlist.append(channel)
+        else:
+            log.warning('No channels defined for "%s"' % network)
 
         if force_ipv6:
             try:

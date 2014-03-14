@@ -12,11 +12,6 @@ install:
   - pip install -r requirements.txt
 # command to run tests, e.g. python setup.py test
 script: nosetests
-#notifications:
-#  irc:
-#    channels:
-#      - "irc.nerv.fi#pyfibot"
-#    skip_join: true
 matrix:
   allow_failures:
     - env: SETUP_TOOLS=">=3.0"
