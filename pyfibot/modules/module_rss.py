@@ -30,12 +30,7 @@ def init(bot, testing=False):
     logger.info('RSS module initialized')
     botref = bot
     config = bot.config.get('rss', {})
-    if updater:
-        try:
-            updater.cancel()
-        except twisted.internet.error.AlreadyCalled:
-            pass
-        updater = None
+    finalize()
     # As there's no signal if this is a rehash or restart
     # update feeds in 30 seconds
     updater = callLater(30, update_feeds)
@@ -51,7 +46,7 @@ def finalize():
             updater.cancel()
         except twisted.internet.error.AlreadyCalled:
             pass
-        updater = None
+    updater = None
 
 
 def get_feeds(**kwargs):
@@ -316,23 +311,23 @@ class Feed(object):
             return
 
         # Read all items for feed
-        logger.info('Feed "%s" updating' % (self.name))
+        logger.debug('Feed "%s" updating' % (self.name))
         self.read()
         # Get number of unprinted items (and don't mark as printed)
         items = self.get_new_items(False)
 
         if len(items) == 0:
-            logger.info('Feed "%s" containes no new items, doing nothing.' % (self.name))
+            logger.debug('Feed "%s" containes no new items, doing nothing.' % (self.name))
             return
 
-        logger.info('Feed "%s" updated with %i new items' % (self.name, len(items)))
+        logger.debug('Feed "%s" updated with %i new items' % (self.name, len(items)))
         # If bot instance isn't found, don't print anything
         bot_instance = botref.find_bot_for_network(self.network)
         if not bot_instance:
             logger.error('Bot instance for "%s" not found, not printing' % (self.name))
             return
 
-        logger.info('Printing new items for "%s"' % (self.name))
+        logger.debug('Printing new items for "%s"' % (self.name))
         # Get all new (not printed) items and print them
         items = self.get_new_items(True)
         for i in items:
