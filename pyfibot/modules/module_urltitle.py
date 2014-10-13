@@ -148,8 +148,6 @@ def handle_url(bot, user, channel, url, msg):
 
     if msg.startswith("-"):
         return
-    if re.match("http://.*?\.imdb\.com/title/tt([0-9]+)/?", url):
-        return  # IMDB urls are handled elsewhere
     if re.match("(http:\/\/open.spotify.com\/|spotify:)(album|artist|track)([:\/])([a-zA-Z0-9]+)\/?", url):
         return  # spotify handled elsewhere
 
@@ -350,6 +348,23 @@ def _handle_verkkokauppa(url):
     return "%s | %s (%s)" % (product, price, availability)
 
 
+def _parse_tweet_from_src(url):
+    bs = __get_bs(url)
+    if not bs:
+        return
+    container = bs.find('div', {'class': 'tweet'})
+    # Return if tweet container wasn't found.
+    if not container:
+        return
+
+    name = container.find('strong', {'class': 'fullname'})
+    user = container.find('span', {'class': 'username'})
+    tweet = container.find('p', {'class': 'tweet-text'})
+    # Return string only if every field was found...
+    if name and user and tweet:
+        return '%s (%s): %s' % (user.text, name.text, tweet.text)
+
+
 def _handle_tweet2(url):
     """http*://twitter.com/*/status/*"""
     return _handle_tweet(url)
@@ -365,7 +380,7 @@ def _handle_tweet(url):
     bearer_token = config.get("twitter_bearer")
     if not bearer_token:
         log.info("Use util/twitter_application_auth.py to request a bearer token for tweet handling")
-        return
+        return _parse_tweet_from_src(url)
     headers = {'Authorization': 'Bearer ' + bearer_token}
 
     data = bot.get_url(infourl, headers=headers)
@@ -462,6 +477,26 @@ def _handle_youtube_gdata(url):
         agestr = __get_age_str(published)
 
         return "%s by %s [%s - %s - %s views - %s%s]" % (title, author, lengthstr, stars, views, agestr, adult)
+
+def _handle_imdb(url):
+    """http://*imdb.com/title/tt*"""
+    m = re.match("http://.*?\.imdb\.com/title/(tt[0-9]+)/?", url)
+    if not m:
+        return
+
+    params = {'i': m.group(1)}
+    r = bot.get_url('http://www.omdbapi.com/', params=params)
+    data = r.json()
+
+    name = data['Title']
+    year = data['Year']
+    rating = data['imdbRating']
+    votes = __get_views(int(data['imdbVotes'].replace(',','')))
+    genre = data['Genre'].lower()
+
+    title = '%s (%s) - %s/10 (%s votes) - %s' % (name, year, rating, votes, genre)
+
+    return title
 
 
 def _handle_helmet(url):
@@ -663,11 +698,6 @@ def _handle_areena(url):
 
 def _handle_wikipedia(url):
     """*wikipedia.org*"""
-    def get_redirect(content):
-        if '#redirect' in content.lower() or \
-           '<li>redirect' in content.lower():
-            return True
-        return False
 
     def clean_page_name(url):
         # select part after '/' as article and unquote it (replace stuff like %20) and decode to unicode
@@ -679,78 +709,45 @@ def _handle_wikipedia(url):
     def get_content(url):
         params = {
             'format': 'json',
-            'action': 'parse',
-            'prop': 'text',
-            'section': 0,
-            'page': clean_page_name(url)
+            'action': 'query',
+            'prop': 'extracts',
+            # request 5 sentences, because Wikipedia seems to think that
+            # period is always indicative of end of sentence
+            'exsentences': 5,
+            'redirects': '',
+            'titles': clean_page_name(url)
         }
 
         language = url.split('/')[2].split('.')[0]
         api = "http://%s.wikipedia.org/w/api.php" % (language)
 
         r = bot.get_url(api, params=params)
+
         try:
-            content = r.json()['parse']['text']['*']
+            content = r.json()['query']['pages'].values()[0]['extract']
+            content = BeautifulSoup(content).get_text()
         except KeyError:
             return
-        # index to keep track of redirections
-        redirection_index = 0
-        # loop while we get a redirection
-        while get_redirect(content):
-            try:
-                params['page'] = clean_page_name(BeautifulSoup(content).find('a').get('href'))
-            except:
-                return
-            r = bot.get_url(api, params=params)
-            try:
-                content = r.json()['parse']['text']['*']
-            except KeyError:
-                return
-            # increase redirection index and if it seems like we're in endless loop,
-            # fall back to default handler
-            redirection_index += 1
-            if redirection_index > 5:
-                return
-        content = BeautifulSoup(content)
-        # remove tables as un-necessary (don't contain any info we'd want, usually tables on the right)
-        [x.extract() for x in content.findAll('table')]
         return content
-
-    def find_first_paragraph(content):
-        # find the first paragraph, sometimes the first "<p>" is empty
-        for paragraph in content.findAll('p'):
-            # if there's an image in the paragraph, it's most likely incorrectly formatted page
-            #   -> select next paragraph
-            # NOTE: This might not be needed after removing the table, leaving it for now...
-            if paragraph.find('img'):
-                continue
-            # ignore if the paragraph has coordinates in it
-            # (most likely it's the coordinates in top right corner then)
-            if paragraph.find('span', attrs={'id': 'coordinates'}):
-                continue
-            first_paragraph = paragraph.text.strip()
-            if first_paragraph:
-                # Remove all annotations to make splitting easier
-                first_paragraph = re.sub(r'\[.*?\]', '', first_paragraph)
-                # Cleanup brackets (usually includes useless information to IRC)
-                first_paragraph = re.sub(r'\(.*?\)', '', first_paragraph)
-                # Remove " , ", which might be left behind after cleaning up the brackets
-                first_paragraph = first_paragraph.replace(' , ', ', ')
-                # Remove multiple spaces
-                first_paragraph = re.sub(' +', ' ', first_paragraph)
-                return first_paragraph
 
     content = get_content(url)
     if not content:
         return
 
-    first_paragraph = find_first_paragraph(content)
-    if not first_paragraph:
-        return
+    # Remove all annotations to make splitting easier
+    content = re.sub(r'\[.*?\]', '', content)
+    # Cleanup brackets (usually includes useless information to
+    # IRC)
+    content = re.sub(r'\(.*?\)', '', content)
+    # Remove " , ", which might be left behind after cleaning up
+    # the brackets
+    content = content.replace(' , ', ', ')
+    # Remove multiple spaces
+    content = re.sub(' +', ' ', content)
 
     # Define sentence break as something ending in a period and starting with a capital letter,
     # with a whitespace or newline in between
-    sentences = re.split('\.\s[A-ZÅÄÖ]', first_paragraph)
+    sentences = re.split('\.\s[A-ZÅÄÖ]', content)
     # Remove empty values from list.
     sentences = filter(None, sentences)
 
@@ -1221,6 +1218,22 @@ def _handle_poliisi(url):
         return bs.find('div', {'id': 'contentbody'}).find('h1').text.strip()
     except AttributeError:
         return False
+
+
+def _handle_google_play_music(url):
+    """http*://play.google.com/music/*"""
+    bs = __get_bs(url)
+    if not bs:
+        return False
+
+    title = bs.find('meta', {'property': 'og:title'})
+    description = bs.find('meta', {'property': 'og:description'})
+    if not title:
+        return False
+    elif title['content'] == description['content']:
+        return False
+    else:
+        return title['content']
 
 
 def _handle_github(url):
