@@ -193,9 +193,8 @@ def handle_url(bot, user, channel, url, msg):
                 # Handler found, but suggests using the default title instead
                 break
             elif title:
-                cache.put(url, title)
                 # handler found, abort
-                return _title(bot, channel, title, True)
+                return _title(bot, channel, title, True, url=url)
             else:
                 # No specific handler, use generic
                 pass
@@ -233,9 +232,6 @@ def handle_url(bot, user, channel, url, msg):
         if not title:
             return
 
-        # Cache generic titles
-        cache.put(url, title)
-
         if config.get("check_redundant", True) and _check_redundant(url, title):
             log.debug("%s is redundant, not displaying" % title)
             return
@@ -243,8 +239,9 @@ def handle_url(bot, user, channel, url, msg):
         ignored_titles = ['404 Not Found', '403 Forbidden']
         if title in ignored_titles:
             return
-        else:
-            return _title(bot, channel, title)
+
+        # Return title
+        return _title(bot, channel, title, url=url)
 
     except AttributeError:
         # TODO: Nees a better way to handle this. Happens with empty <title> tags
@@ -308,11 +305,15 @@ def _levenshtein_distance(s, t):
     return d[len(s)][len(t)]
 
 
-def _title(bot, channel, title, smart=False, prefix=None):
+def _title(bot, channel, title, smart=False, prefix=None, url=None):
     """Say title to channel"""
 
     if not title:
         return
+
+    if url is not None:
+        # Cache title
+        cache.put(url, title)
 
     if not prefix:
         prefix = "Title:"
@@ -327,8 +328,7 @@ def _title(bot, channel, title, smart=False, prefix=None):
 
     if not info:
         return bot.say(channel, "%s %s" % (prefix, title))
-    else:
-        return bot.say(channel, "%s %s [%s]" % (prefix, title, info))
+    return bot.say(channel, "%s %s [%s]" % (prefix, title, info))
 
 
 def _handle_verkkokauppa(url):
@@ -391,9 +391,9 @@ def _handle_tweet(url):
             log.warning("Error reading tweet (code %s) %s" % (error['code'], error['message']))
         return
 
-    text = tweet['text']
+    text = tweet['text'].strip()
     user = tweet['user']['screen_name']
-    name = tweet['user']['name']
+    name = tweet['user']['name'].strip()
 
     #retweets  = tweet['retweet_count']
     #favorites = tweet['favorite_count']
@@ -478,6 +478,7 @@ def _handle_youtube_gdata(url):
 
         return "%s by %s [%s - %s - %s views - %s%s]" % (title, author, lengthstr, stars, views, agestr, adult)
 
+
 def _handle_imdb(url):
     """http://*imdb.com/title/tt*"""
     m = re.match("http://.*?\.imdb\.com/title/(tt[0-9]+)/?", url)
@@ -491,7 +492,7 @@ def _handle_imdb(url):
     name = data['Title']
     year = data['Year']
     rating = data['imdbRating']
-    votes = __get_views(int(data['imdbVotes'].replace(',','')))
+    votes = __get_views(int(data['imdbVotes'].replace(',', '')))
     genre = data['Genre'].lower()
 
     title = '%s (%s) - %s/10 (%s votes) - %s' % (name, year, rating, votes, genre)
