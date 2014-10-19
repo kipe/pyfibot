@@ -890,7 +890,7 @@ def _handle_liveleak(url):
         pass
 
     try:
-        tags = BeautifulSoup(info.split('<strong>Tags:</strong>')[1].split('<br')[0]).text
+        tags = BeautifulSoup(info.split('<strong>Tags:</strong>')[1].split('<br')[0]).text.strip()
     except:
         pass
 
@@ -1008,7 +1008,7 @@ def _handle_dealextreme(url):
     """http*://dx.com/p/*"""
     sku = url.split('?')[0].split('-')[-1]
     cookies = {'DXGlobalization': 'lang=en&locale=en-US&currency=EUR'}
-    api_url = 'http://dx.com/bi/GetSKUInfo?sku=%s' % sku
+    api_url = 'http://www.dx.com/bi/GetSKUInfo?sku=%s' % sku
 
     r = bot.get_url(api_url, cookies=cookies)
 
