@@ -365,6 +365,11 @@ def _parse_tweet_from_src(url):
         return '%s (%s): %s' % (user.text, name.text, tweet.text)
 
 
+def _handle_mobile_tweet(url):
+    """http*://mobile.twitter.com/*/status/*"""
+    return _handle_tweet(url)
+
+
 def _handle_tweet2(url):
     """http*://twitter.com/*/status/*"""
     return _handle_tweet(url)
@@ -373,7 +378,8 @@ def _handle_tweet2(url):
 def _handle_tweet(url):
     """http*://twitter.com/*/statuses/*"""
     tweet_url = "https://api.twitter.com/1.1/statuses/show.json?id=%s&include_entities=false"
-    test = re.match("https?://twitter\.com\/(\w+)/status(es)?/(\d+)", url)
+    test = re.match("https?://.*?twitter\.com\/(\w+)/status(es)?/(\d+)", url)
+    if not test: return
     # matches for unique tweet id string
     infourl = tweet_url % test.group(3)
 
@@ -1235,6 +1241,29 @@ def _handle_google_play_music(url):
         return False
     else:
         return title['content']
+
+
+def _handle_steamstore(url):
+    """http://store.steampowered.com/app/*"""
+
+    # https://wiki.teamfortress.com/wiki/User:RJackson/StorefrontAPI
+    api_url = "http://store.steampowered.com/api/appdetails/"
+    app = re.match("http://store\.steampowered\.com\/app/(?P<id>\d+)", url)
+    params = { 'appids': app.group('id'), 'cc': 'fi' }
+
+    r = bot.get_url(api_url, params=params)
+    data = r.json()[app.group('id')]['data']
+
+    name = data['name']
+    if 'price_overview' in data:
+        price = "%.2fe" % (float(data['price_overview']['final'])/100)
+
+        if data['price_overview']['discount_percent'] != 0:
+            price += " (-%s%%)" % data['price_overview']['discount_percent']
+    else:
+        price = "Free to play"
+
+    return "%s | %s" % (name, price)
 
 
 def _handle_github(url):
