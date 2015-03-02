@@ -498,7 +498,10 @@ def _handle_imdb(url):
     name = data['Title']
     year = data['Year']
     rating = data['imdbRating']
-    votes = __get_views(int(data['imdbVotes'].replace(',', '')))
+    try:
+        votes = __get_views(int(data['imdbVotes'].replace(',', '')))
+    except ValueError:
+        votes = "0"
     genre = data['Genre'].lower()
 
     title = '%s (%s) - %s/10 (%s votes) - %s' % (name, year, rating, votes, genre)
@@ -681,8 +684,13 @@ def _handle_areena(url):
 
     try:
         if content_type in ['EPISODE', 'CLIP', 'PROGRAM']:
+            try:
+                name = data['pageTitle'].lstrip(': ')
+            except KeyError:
+                name = data['reportingTitle']
             # sometimes there's a ": " in front of the name for some reason...
-            name = data['reportingTitle'].lstrip(': ')
+            name = name.lstrip(': ')
+
             duration = __get_length_str(data['durationSec'])
             broadcasted = __get_age_str(datetime.strptime(data['published'], '%Y-%m-%dT%H:%M:%S'))
             if data['expires']:
@@ -748,7 +756,7 @@ def _handle_wikipedia(url):
     content = re.sub(r'\(.*?\)', '', content)
     # Remove " , ", which might be left behind after cleaning up
     # the brackets
-    content = content.replace(' , ', ', ')
+    content = re.sub(' +,', ', ', content)
     # Remove multiple spaces
     content = re.sub(' +', ' ', content)
 
@@ -1180,7 +1188,7 @@ def _handle_hitbox(url):
         return
 
     # Hitbox titles are populated by JavaScript so they return a useless "{{meta.title}}", don't show those
-    elif not re.match("http://(www\.)?hitbox\.tv/([a-z0-9]+)$", url):
+    elif not re.match("http://(www\.)?hitbox\.tv/([A-Za-z0-9]+)$", url):
         return False
 
     # For actual stream pages, let's fetch information via the hitbox API
