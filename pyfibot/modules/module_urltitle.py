@@ -10,6 +10,7 @@ import fnmatch
 import urlparse
 import logging
 import re
+import sys
 from datetime import datetime
 import math
 
@@ -18,6 +19,11 @@ from types import TupleType
 from repoze.lru import ExpiringLRUCache
 
 from bs4 import BeautifulSoup
+
+use_lxml = False
+if sys.hexversion < 0x02070000:
+    import lxml
+    use_lxml = True
 
 log = logging.getLogger("urltitle")
 config = None
@@ -63,7 +69,10 @@ def __get_bs(url):
 
     content = r.content
     if content:
-        return BeautifulSoup(content)
+        if use_lxml:
+            return BeautifulSoup(content, 'lxml')
+        else:
+            return BeautifulSoup(content)
     return None
 
 
@@ -423,66 +432,68 @@ def _handle_youtube_gdata_new(url):
 
 def _handle_youtube_gdata(url):
     """http*://*youtube.com/watch?*v=*"""
-    # Fetches everything the api knows about the video
-    #gdata_url = "http://gdata.youtube.com/feeds/api/videos/%s"
-    # This fetches everything that is needed by the handle, using partial response.
-    gdata_url = "https://gdata.youtube.com/feeds/api/videos/%s?fields=title,author,gd:rating,media:group(yt:duration),media:group(media:rating),yt:statistics,published&alt=json&v=2"
 
-    match = re.match("https?://youtu.be/(.*)", url)
+    api_key = config.get('google_apikey',
+                         'AIzaSyD5a4Johhq5K0ARWX-rQMwsNz0vTtQbKNY')
+
+    api_url = 'https://www.googleapis.com/youtube/v3/videos'
+
+    # match both plain and direct time url
+    match = re.match("https?://youtu.be/([^\?]+)(\?t=.*)?", url)
     if not match:
         match = re.match("https?://.*?youtube.com/watch\?.*?v=([^&]+)", url)
     if match:
-        infourl = gdata_url % match.group(1)
-        params = {'alt': 'json', 'v': '2'}
-        r = bot.get_url(infourl, params=params)
+        params = {'id': match.group(1),
+                  'part': 'snippet,contentDetails,statistics',
+                  'fields': 'items(id,snippet,contentDetails,statistics)',
+                  'key': api_key}
+
+        r = bot.get_url(api_url, params=params)
 
         if not r.status_code == 200:
-            log.info("Video too recent, no info through API yet.")
+            error = r.json().get('error')
+            if error:
+                error = '%s: %s' % (error['code'], error['message'])
+            else:
+                error = r.status_code
+
+            log.warning('YouTube API error: %s', error)
             return
 
-        entry = r.json()['entry']
+        items = r.json()['items']
+        if len(items) == 0: return
 
-        ## Author
-        author = entry['author'][0]['name']['$t']
+        entry = items[0]
 
-        ## Rating in stars
+        channel = entry['snippet']['channelTitle']
+
         try:
-            rating = entry.get('gd$rating', None)['average']
-        except TypeError:
-            rating = 0.0
-
-        stars = "[%-5s]" % (int(round(rating)) * "*")
-
-        ## View count
-        try:
-            views = int(entry['yt$statistics']['viewCount'])
+            views = int(entry['statistics']['viewCount'])
             views = __get_views(views)
         except KeyError:
-            # No views at all, the whole yt$statistics block is missing
             views = 'no'
 
-        ## Title
-        title = entry['title']['$t']
+        title = entry['snippet']['title']
 
-        ## Age restricted?
-        # https://developers.google.com/youtube/2.0/reference#youtube_data_api_tag_media:rating
-        rating = entry['media$group'].get('media$rating', None)
-
-        ## Content length
-        secs = int(entry['media$group']['yt$duration']['seconds'])
-        lengthstr = __get_length_str(secs)
-
+        rating = entry['contentDetails'].get('contentRating', None)
         if rating:
-            adult = " - XXX"
+            rating = rating.get('ytRating', None)
+
+        # The tag value is an ISO 8601 duration in the format PT#M#S
+        duration = entry['contentDetails']['duration'][2:].lower()
+
+        if rating and rating == 'ytAgeRestricted':
+            agerestricted = " - age restricted"
         else:
-            adult = ""
+            agerestricted = ""
 
         ## Content age
-        published = entry['published']['$t']
+        published = entry['snippet']['publishedAt']
         published = datetime.strptime(published, "%Y-%m-%dT%H:%M:%S.%fZ")
         agestr = __get_age_str(published)
 
-        return "%s by %s [%s - %s - %s views - %s%s]" % (title, author, lengthstr, stars, views, agestr, adult)
+        return "%s by %s [%s - %s views - %s%s]" % (
+            title, channel, duration, views, agestr, agerestricted)
 
 
 def _handle_imdb(url):
@@ -638,8 +649,8 @@ def _handle_aamulehti(url):
     return title
 
 
-def _handle_areena(url):
-    """http://areena.yle.fi/*"""
+def _handle_areena_v3(url):
+    """http://areena-v3.yle.fi/*"""
     def areena_get_exit_str(text):
         dt = datetime.strptime(text, '%Y-%m-%dT%H:%M:%S') - datetime.now()
         if dt.days > 7:
@@ -709,6 +720,34 @@ def _handle_areena(url):
         # We want to exit cleanly, so it falls back to default url handler
         log.debug('Unhandled error in Areena.')
         return
+
+
+def _handle_areena(url):
+    """http://areena.yle.fi/*"""
+    if 'suora' in url:
+        bs = __get_bs(url)
+        container = bs.find('div', {'class': 'selected'})
+        channel = container.find('h3').text
+        program = container.find('span', {'class': 'status-current'}).next_element.next_element
+        link = program.find('a').get('href', None)
+        if not program:
+            return '%s (LIVE)' % (channel)
+        if not link:
+            return '%s - %s (LIVE)' % (channel, program.text.strip())
+        return '%s - %s <http://areena.yle.fi/%s> (LIVE)' % (channel, program.text.strip(), link.lstrip('/'))
+
+    # TODO: Whole rewrite, as this relies on the old system which will be brought down...
+    try:
+        identifier = url.split('-')[1]
+    except IndexError:
+        return
+
+    tv = _handle_areena_v3('http://areena-v3.yle.fi/tv/%s' % (identifier))
+    if tv:
+        return tv
+    radio = _handle_areena_v3('http://areena-v3.yle.fi/radio/%s' % (identifier))
+    if radio:
+        return radio
 
 
 def _handle_wikipedia(url):
@@ -791,7 +830,7 @@ def _handle_wikipedia(url):
 
 
 def _handle_imgur(url):
-    """http://*imgur.com*"""
+    """http*://*imgur.com*"""
 
     def create_title(data):
         section = data['data']['section']
@@ -1222,18 +1261,6 @@ def _handle_hitbox(url):
         return False
 
 
-def _handle_poliisi(url):
-    """http*://*poliisi.fi/poliisi/*"""
-    bs = __get_bs(url)
-    # If there's no BS, the default handler can't get it either...
-    if not bs:
-        return False
-
-    try:
-        return bs.find('div', {'id': 'contentbody'}).find('h1').text.strip()
-    except AttributeError:
-        return False
-
 
 def _handle_google_play_music(url):
     """http*://play.google.com/music/*"""
@@ -1302,4 +1329,8 @@ def _handle_travis(url):
 
 def _handle_ubuntupaste(url):
     """http*://paste.ubuntu.com/*"""
+    return False
+
+def _handle_poliisi(url):
+    """http*://*poliisi.fi/*/tiedotteet/*"""
     return False
