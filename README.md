@@ -1,5 +1,12 @@
+[![PyPi version](https://img.shields.io/pypi/v/pyfibot.svg)](https://pypi.python.org/pypi/pyfibot/)
+[![Build Status](https://travis-ci.org/lepinkainen/pyfibot.png?branch=master)](https://travis-ci.org/lepinkainen/pyfibot)
+[![Coverage Status](https://coveralls.io/repos/lepinkainen/pyfibot/badge.svg?branch=master&service=github)](https://coveralls.io/github/lepinkainen/pyfibot?branch=master)
+
+
 pyfibot
 =======
+
+[![Join the chat at https://gitter.im/lepinkainen/pyfibot](https://badges.gitter.im/lepinkainen/pyfibot.svg)](https://gitter.im/lepinkainen/pyfibot?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
 
 A Python IRC-bot made using the [Twisted Matrix](http://twistedmatrix.com/trac/) IRC-library.
 
@@ -45,9 +52,5 @@ Support can be found at #pyfibot on irc.nerv.fi and please contact
 yllapito@nerv.fi if you want to connect outside of Finland (will be 
 changed) or need help with IRC-network.
 
-[![Build Status](https://travis-ci.org/lepinkainen/pyfibot.png?branch=master)](https://travis-ci.org/lepinkainen/pyfibot)
 
 This product includes GeoLite data created by MaxMind, available from [http://www.maxmind.com](http://maxmind.com/).
-
-
-[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/lepinkainen/pyfibot/trend.png)](https://bitdeli.com/free "Bitdeli Badge")

@@ -1,3 +1,4 @@
+from __future__ import unicode_literals, print_function, division
 from xml.etree import ElementTree as ET
 import requests
 from datetime import datetime
@@ -6,10 +7,10 @@ from dateutil.parser import parse as parse_dt
 
 
 def find_series(name):
-    '''
+    """
     Finds the first show which hasn't ended.
     If no running shows are found, returns the first result.
-    '''
+    """
     r = requests.get(
         'http://services.tvrage.com/feeds/search.php',
         params={'show': name}
@@ -26,7 +27,7 @@ def find_series(name):
 
 
 def command_tvrage(bot, user, channel, args):
-    ''' Fetch episode information from tvrage. '''
+    """Fetch episode information from tvrage."""
     if not args:
         return bot.say(channel, 'I need a show to search for!')
 

@@ -1,12 +1,20 @@
 language: python
 sudo: false
+cache: pip
 python:
-  - "2.6"
   - "2.7"
-  - "pypy"
+env:
+  - VCR_RECORD_MODE=none  # only use recorded tests, errors on nonexisting tests
+  - VCR_RECORD_MODE=all   # don't use recorded tests, do it LIVE
+
 # command to install dependencies, e.g. pip install -r requirements.txt --use-mirrors
+before_install:
+  - pip install coverage coveralls
 install:
   - pip install --upgrade pip setuptools
   - pip install -r requirements.txt
-# command to run tests, e.g. python setup.py test
-script: nosetests
+  - pip install -r requirements_test.txt
+
+before_script: export PYTHONPATH=$PYTHONPATH:$(pwd)
+# run tests with test coverage
+script: coverage run --source pyfibot -m py.test

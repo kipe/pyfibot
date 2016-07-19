@@ -5,6 +5,12 @@ nick: botnick
 admins:
   - root!root@localhost
 
+# Set the command character for the bot
+cmdchar: '.'
+
+# Set realname for the bot
+realname: 'https://github.com/lepinkainen/pyfibot'
+
 # Networks to connect to
 networks:
   # Alias for network
@@ -13,6 +19,8 @@ networks:
     server: irc.nerv.fi
     # We use a different nick on this network
     nick: botnick_nerv
+    # As well as different realname
+    realname: 'pyfibot'
     # List of channels to join
     channels:
       - pyfibot
@@ -97,8 +105,17 @@ module_urltitle:
   # https://dev.twitter.com/apps and generate token with
   # pyfibot/util/twitter_application_auth.py
   twitter_bearer: ''
+  # YLE Areena API information.
+  # If for some reason you don't want to use the default,
+  # you can get one from http://developer.yle.fi
+  areena:
+    app_id: 'cd556936'
+    app_key: '25a08bbaa8101cca1bf0d1879bb13012'
 
 module_openweather:
+  # Application ID for OpenWeatherMap, required for use
+  # http://openweathermap.org/api
+  appid: ''
   # Location to show when no arguments are provided
   # default: Helsinki
   default_location: Helsinki
@@ -120,3 +137,7 @@ module_wolfram_alpha:
   # See http://products.wolframalpha.com/api/documentation.html#1
   # default: None
   appid: ''
+
+module_posti:
+  # Language selection for posti
+  language: en

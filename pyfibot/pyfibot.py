@@ -53,11 +53,12 @@ log = logging.getLogger('core')
 
 class Network:
     """Represents an IRC network"""
-    def __init__(self, root, alias, address, nickname, channels=None, linerate=None, password=None, is_ssl=False):
+    def __init__(self, root, alias, address, nickname, realname=None, channels=None, linerate=None, password=None, is_ssl=False):
         self.root = root
         self.alias = alias                         # network name
         self.address = address                     # server address
         self.nickname = nickname                   # nick to use
+        self.realname = realname
         self.channels = channels or {}             # channels to join
         self.linerate = linerate
         self.password = password
@@ -103,8 +104,6 @@ class PyFiBotFactory(ThrottledClientFactory):
         self.data = {}
         self.data['networks'] = {}
         self.ns = {}
-        # Cache url contents for 5 minutes, check for old entries every minute
-        #self._urlcache = timeoutdict.TimeoutDict(timeout=300, pollinterval=60)
 
     def startFactory(self):
         self.allBots = {}
@@ -135,7 +134,7 @@ class PyFiBotFactory(ThrottledClientFactory):
             # this network, connect to it and stop looking
             if address.host in ips:
                 log.debug("Connecting to %s / %s", server, address)
-                p = self.protocol(server)
+                p = self.protocol(self.config, server)
                 self.allBots[server.alias] = p
                 p.factory = self
                 return p
@@ -144,8 +143,8 @@ class PyFiBotFactory(ThrottledClientFactory):
         log.error("Unknown network address: " + repr(address))
         return InstantDisconnectProtocol()
 
-    def createNetwork(self, address, alias, nickname, channels=None, linerate=None, password=None, is_ssl=False):
-        self.setNetwork(Network("data", alias, address, nickname, channels, linerate, password, is_ssl))
+    def createNetwork(self, address, alias, nickname, realname, channels=None, linerate=None, password=None, is_ssl=False):
+        self.setNetwork(Network("data", alias, address, nickname, realname, channels, linerate, password, is_ssl))
 
     def setNetwork(self, net):
         self.data['networks'][net.alias] = net
@@ -225,10 +224,9 @@ class PyFiBotFactory(ThrottledClientFactory):
     def getUrl(self, url, nocache=False, params=None, headers=None, cookies=None):
         """Gets data, bs and headers for the given url, using the internal cache if necessary"""
 
-        browser = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.95 Safari/537.11"
+        browser = "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:43.0) Gecko/20100101 Firefox/43.0"
         # Common session for all requests
         s = requests.session()
-        s.verify = False
         s.stream = True  # Don't fetch content unless asked
         s.headers.update({'User-Agent': browser})
         # Custom headers from requester
@@ -242,6 +240,9 @@ class PyFiBotFactory(ThrottledClientFactory):
             r = s.get(url, params=params)
         except requests.exceptions.InvalidSchema:
             log.error("Invalid schema in URI: %s" % url)
+            return None
+        except requests.exceptions.SSLError:
+            log.error("SSL Error when connecting to %s" % url)
             return None
         except requests.exceptions.ConnectionError:
             log.error("Connection error when connecting to %s" % url)
@@ -336,6 +337,9 @@ class PyFiBotFactory(ThrottledClientFactory):
             del self.config[k]
         for k in dd.changed():
             log.info('%s changed' % k)
+            if not isinstance(config[k], dict):
+                continue
+
             # compare configs
             d = DictDiffer(config[k], old_config[k])
             # add all changes to a big list
@@ -354,6 +358,11 @@ class PyFiBotFactory(ThrottledClientFactory):
             logging.root.setLevel(logging.DEBUG)
         else:
             logging.root.setLevel(logging.INFO)
+
+        # change cmdchar, default to "."
+        cmdchar = config.get('cmdchar', '.')
+        for key, bot in self.allBots.items():
+            bot.cmdchar = cmdchar
 
     def find_bot_for_network(self, network):
         if network not in self.allBots:
@@ -426,6 +435,7 @@ def main():
     for network, settings in config['networks'].items():
         # settings = per network, config = global
         nick = settings.get('nick', None) or config['nick']
+        realname = settings.get('realname') or config.get('realname')
         linerate = settings.get('linerate', 0.5) or config.get('linerate', 0.5)
         password = settings.get('password', None)
         is_ssl = bool(settings.get('is_ssl', False))
@@ -452,7 +462,7 @@ def main():
         else:
             server_name = settings['server']
 
-        factory.createNetwork((server_name, port), network, nick, chanlist, linerate, password, is_ssl)
+        factory.createNetwork((server_name, port), network, nick, realname, chanlist, linerate, password, is_ssl)
         if is_ssl:
             log.info("connecting via SSL to %s:%d" % (server_name, port))
             reactor.connectSSL(server_name, port, factory, ssl.ClientContextFactory())

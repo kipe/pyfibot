@@ -5,13 +5,14 @@ Smart title functionality for sites which could have clear titles,
 but still decide show idiotic bulk data in the HTML title element
 """
 
-from __future__ import print_function, division
+from __future__ import unicode_literals, print_function, division
 import fnmatch
 import urlparse
 import logging
 import re
-import sys
-from datetime import datetime
+from datetime import datetime, timedelta
+from dateutil.tz import tzutc
+from dateutil.parser import parse as parse_datetime
 import math
 
 from types import TupleType
@@ -20,10 +21,6 @@ from repoze.lru import ExpiringLRUCache
 
 from bs4 import BeautifulSoup
 
-use_lxml = False
-if sys.hexversion < 0x02070000:
-    import lxml
-    use_lxml = True
 
 log = logging.getLogger("urltitle")
 config = None
@@ -49,6 +46,8 @@ def init(botref):
 
 
 def __get_bs(url):
+    """Attempt to get a beautifulsoup object for the given url"""
+
     # Fetch the content and measure how long it took
     start = datetime.now()
     r = bot.get_url(url)
@@ -67,16 +66,15 @@ def __get_bs(url):
         log.debug("Content-type %s not parseable" % content_type)
         return None
 
-    content = r.content
-    if content:
-        if use_lxml:
-            return BeautifulSoup(content, 'lxml')
-        else:
-            return BeautifulSoup(content)
-    return None
+    if r.content:
+        return BeautifulSoup(r.content, 'html.parser')
+    else:
+        return None
 
 
 def __get_title_tag(url):
+    """Get the plain title tag for the site"""
+
     bs = __get_bs(url)
     if not bs:
         return False
@@ -102,8 +100,8 @@ def __get_length_str(secs):
     return ''.join(lengthstr)
 
 
-def __get_age_str(published):
-    now = datetime.now()
+def __get_age_str(published, use_fresh=True):
+    now = datetime.now(tz=published.tzinfo)
 
     # Check if the publish date is in the future (upcoming episode)
     if published > now:
@@ -113,22 +111,32 @@ def __get_age_str(published):
         age = now - published
         future = False
 
-    halfyears, days = age.days // 182, age.days % 365
+    secs = age.total_seconds()
+
+    halfyears, days, hours, minutes = age.days // 182, age.days % 365, secs // 3600, secs // 60 % 60
+
     agestr = []
     years = halfyears * 0.5
+
+    # uploaded TODAY, whoa.
+    if years == 0 and days == 0 and use_fresh:
+        return 'FRESH'
+
     if years >= 1:
         agestr.append("%gy" % years)
     # don't display days for videos older than 6 months
     if years < 1 and days > 0:
         agestr.append("%dd" % days)
-    # complete the age string
-    if agestr and (years or days):
+
+    if not agestr:
+        agestr.append('%dh' % hours)
+
+    if not agestr:
+        agestr.append('%dm' % minutes)
+
+    if agestr:
         agestr.append(" from now" if future else " ago")
-    elif years == 0 and days == 0:  # uploaded TODAY, whoa.
-        agestr.append("FRESH")
-    # If it shouldn't happen, why is it needed? ;)
-    # else:
-    #     agestr.append("ANANASAKÄÄMÄ")  # this should never happen =)
+
     return "".join(agestr)
 
 
@@ -140,7 +148,25 @@ def __get_views(views):
     return '%.0f%s' % (views / 10 ** (3 * millidx), millnames[millidx])
 
 
+# https://developers.google.com/webmasters/ajax-crawling/docs/specification
+def __escaped_fragment(url, meta=False):
+    url = urlparse.urlsplit(url)
+    if not url.fragment or not url.fragment.startswith('!'):
+        if not meta:
+            return url.geturl()
+
+    query = url.query
+    if query:
+        query += '&'
+    query += '_escaped_fragment_='
+    if url.fragment:
+        query += url.fragment[1:]
+
+    return urlparse.urlunsplit((url.scheme, url.netloc, url.path, query, ''))
+
+
 def command_cache(bot, user, channel, args):
+    """Enable or disable url title caching"""
     global CACHE_ENABLED
     if isAdmin(user):
         CACHE_ENABLED = not CACHE_ENABLED
@@ -157,7 +183,7 @@ def handle_url(bot, user, channel, url, msg):
 
     if msg.startswith("-"):
         return
-    if re.match("(http:\/\/open.spotify.com\/|spotify:)(album|artist|track)([:\/])([a-zA-Z0-9]+)\/?", url):
+    if re.match(r"(https?:\/\/open.spotify.com\/|spotify:)(album|artist|track)([:\/])([a-zA-Z0-9]+)\/?", url):
         return  # spotify handled elsewhere
 
     if channel.lstrip("#") in config.get('disable', ''):
@@ -177,10 +203,9 @@ def handle_url(bot, user, channel, url, msg):
             log.info("Ignored url from user: %s, %s %s", user, url, ignore)
             return
 
-    # a crude way to handle the new-fangled shebang urls as per
-    # http://code.google.com/web/ajaxcrawling/docs/getting-started.html
-    # this can manage twitter + gawker sites for now
-    url = url.replace("#!", "?_escaped_fragment_=")
+    # Parse shebang fragments according to Google's specification
+    if url.rfind('#!') != -1:
+        url = __escaped_fragment(url)
 
     # Check if the url already has a title cached
     if CACHE_ENABLED:
@@ -211,9 +236,18 @@ def handle_url(bot, user, channel, url, msg):
     log.debug("No specific handler found, using generic")
     # Fall back to generic handler
     bs = __get_bs(url)
+
+    # Handle case of failed connection
     if not bs:
         log.debug("No BS available, returning")
         return
+
+    # According to Google's Making AJAX Applications Crawlable specification
+    fragment = bs.find('meta', {'name': 'fragment'})
+    if fragment and fragment.get('content') == '!':
+        log.debug("Fragment meta tag on page, getting non-ajax version")
+        url = __escaped_fragment(url, meta=True)
+        bs = __get_bs(url)
 
     # Try and get title meant for social media first, it's usually fairly accurate
     title = bs.find('meta', {'property': 'og:title'})
@@ -332,12 +366,13 @@ def _title(bot, channel, title, smart=False, prefix=None, url=None):
         info = title[1]
         title = title[0]
     # crop obscenely long titles
-    if len(title) > 200:
-        title = title[:200] + "..."
+    if len(title) > 400:
+        title = title[:400] + "..."
 
     if not info:
         return bot.say(channel, "%s %s" % (prefix, title))
-    return bot.say(channel, "%s %s [%s]" % (prefix, title, info))
+    else:
+        return bot.say(channel, "%s %s [%s]" % (prefix, title, info))
 
 
 def _handle_verkkokauppa(url):
@@ -387,8 +422,9 @@ def _handle_tweet2(url):
 def _handle_tweet(url):
     """http*://twitter.com/*/statuses/*"""
     tweet_url = "https://api.twitter.com/1.1/statuses/show.json?id=%s&include_entities=false"
-    test = re.match("https?://.*?twitter\.com\/(\w+)/status(es)?/(\d+)", url)
-    if not test: return
+    test = re.match(r"https?://.*?twitter\.com\/(\w+)/status(es)?/(\d+)", url)
+    if not test:
+        return
     # matches for unique tweet id string
     infourl = tweet_url % test.group(3)
 
@@ -409,14 +445,36 @@ def _handle_tweet(url):
     text = tweet['text'].strip()
     user = tweet['user']['screen_name']
     name = tweet['user']['name'].strip()
+    verified = tweet['user']['verified']
 
-    #retweets  = tweet['retweet_count']
-    #favorites = tweet['favorite_count']
-    #created   = tweet['created_at']
-    #created_date = datetime.strptime(created, "%a %b %d %H:%M:%S +0000 %Y")
-    #tweet_age = datetime.now()-created_date
+    retweets = tweet['retweet_count']
+    favorites = tweet['favorite_count']
+    created_date = parse_datetime(tweet['created_at'])
 
-    tweet = "@%s (%s): %s" % (user, name, text)
+    def twit_timestr(dt):
+        """A coarse timestr function"""
+
+        months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        diff = datetime.now(tzutc()) - dt
+        if diff.days > 30 * 6:
+            return "%i %s %i" % (dt.day, months[dt.month - 1], dt.year)
+        elif diff.days > 30:
+            return "%i %s" % (dt.day, months[dt.month - 1])
+        elif diff.days:
+            return "%id" % diff.days
+        elif diff.seconds > 3600:
+            return "%ih" % (diff.seconds / 3600)
+        elif diff.seconds > 60:
+            return "%im" % (diff.seconds / 60)
+        else:
+            return "now"
+
+    user = "@{0}".format(user)
+    if verified:
+        user = "✔{0}".format(user)
+
+    tweet = "{0} ({1}) {2}: {3} [♻ {4} ♥ {5}]".format(name, user, twit_timestr(created_date), text, retweets, favorites)
     return tweet
 
 
@@ -439,9 +497,9 @@ def _handle_youtube_gdata(url):
     api_url = 'https://www.googleapis.com/youtube/v3/videos'
 
     # match both plain and direct time url
-    match = re.match("https?://youtu.be/([^\?]+)(\?t=.*)?", url)
+    match = re.match(r"https?://youtu.be/([^\?]+)([\?#]t=.*)?", url)
     if not match:
-        match = re.match("https?://.*?youtube.com/watch\?.*?v=([^&]+)", url)
+        match = re.match(r"https?://.*?youtube.com/watch\?.*?v=([^&#]+)", url)
     if match:
         params = {'id': match.group(1),
                   'part': 'snippet,contentDetails,statistics',
@@ -449,6 +507,10 @@ def _handle_youtube_gdata(url):
                   'key': api_key}
 
         r = bot.get_url(api_url, params=params)
+
+        # get_url returns None on exception
+        if r is None:
+            return False
 
         if not r.status_code == 200:
             error = r.json().get('error')
@@ -461,7 +523,8 @@ def _handle_youtube_gdata(url):
             return
 
         items = r.json()['items']
-        if len(items) == 0: return
+        if len(items) == 0:
+            return
 
         entry = items[0]
 
@@ -487,7 +550,7 @@ def _handle_youtube_gdata(url):
         else:
             agerestricted = ""
 
-        ## Content age
+        # Content age
         published = entry['snippet']['publishedAt']
         published = datetime.strptime(published, "%Y-%m-%dT%H:%M:%S.%fZ")
         agestr = __get_age_str(published)
@@ -498,7 +561,7 @@ def _handle_youtube_gdata(url):
 
 def _handle_imdb(url):
     """http://*imdb.com/title/tt*"""
-    m = re.match("http://.*?\.imdb\.com/title/(tt[0-9]+)/?", url)
+    m = re.match(r"http://.*?\.imdb\.com/title/(tt[0-9]+)/?", url)
     if not m:
         return
 
@@ -571,7 +634,7 @@ def _handle_alko(url):
 def _handle_vimeo(url):
     """*vimeo.com/*"""
     data_url = "http://vimeo.com/api/v2/video/%s.json"
-    match = re.match("http(s?)://.*?vimeo.com/(\d+)", url)
+    match = re.match(r"http(s?)://.*?vimeo.com/(\d+)", url)
     if not match:
         return None
 
@@ -593,7 +656,7 @@ def _handle_vimeo(url):
 def _handle_stackoverflow(url):
     """*stackoverflow.com/questions/*"""
     api_url = 'http://api.stackexchange.com/2.2/questions/%s'
-    match = re.match('.*stackoverflow.com/questions/([0-9]+)', url)
+    match = re.match(r'.*stackoverflow.com/questions/([0-9]+)', url)
     if match is None:
         return
     question_id = match.group(1)
@@ -619,21 +682,26 @@ def _handle_reddit(url):
     else:
         ending = ".json"
     json_url = url + ending
+
     content = bot.get_url(json_url)
+
     if not content:
         log.debug("No content received")
         return
     try:
         data = content.json()[0]['data']['children'][0]['data']
+        # truncate title so that the point and comment data fits
         title = data['title']
-        ups = data['ups']
-        downs = data['downs']
-        score = ups - downs
+        if len(title) > 170:
+            title = "{0:.170}…".format(title)
+
+        score = data['score']
         num_comments = data['num_comments']
         over_18 = data['over_18']
-        result = "%s - %dpts (%d ups, %d downs) - %d comments" % (title, score, ups, downs, num_comments)
-        if over_18 is True:
-            result = result + " (NSFW)"
+
+        result = "{0} [{1} pts, {2} comments]".format(title, score, num_comments)
+        if over_18:
+            result = "{0} (NSFW)".format(result)
         return result
     except:
         # parsing error, use default title
@@ -649,105 +717,179 @@ def _handle_aamulehti(url):
     return title
 
 
-def _handle_areena_v3(url):
-    """http://areena-v3.yle.fi/*"""
-    def areena_get_exit_str(text):
-        dt = datetime.strptime(text, '%Y-%m-%dT%H:%M:%S') - datetime.now()
-        if dt.days > 7:
-            return u'%i weeks' % (dt.days / 7)
-        if dt.days >= 1:
-            return u'%i days' % (dt.days)
-        if dt.seconds >= 3600:
-            return u'%i hours' % (dt.seconds / 3600)
-        return u'%i minutes' % (dt.seconds / 60)
-
-    splitted = url.split('/')
-    # if "suora" found in url (and in the correct place),
-    # needs a bit more special handling as no api is available
-    if len(splitted) > 4 and splitted[4] == 'suora':
-        bs = __get_bs(url)
-        try:
-            container = bs.find('section', {'class': 'simulcast'})
-        except:
-            return
-        channel = container.find('a', {'class': 'active'}).text.strip()
-        return '%s (LIVE)' % (channel)
-
-    # create json_url from original url
-    json_url = '%s.json' % url.split('?')[0]
-    r = bot.get_url(json_url)
-
-    try:
-        data = r.json()
-    except:
-        log.debug("Couldn't parse JSON.")
-        return
-
-    try:
-        content_type = data['contentType']
-    except KeyError:
-        # there's no clear identifier for series
-        if 'episodeCountTotal' in data:
-            content_type = 'SERIES'
-        else:
-            # assume EPISODE
-            content_type = 'EPISODE'
-
-    try:
-        if content_type in ['EPISODE', 'CLIP', 'PROGRAM']:
-            try:
-                name = data['pageTitle'].lstrip(': ')
-            except KeyError:
-                name = data['reportingTitle']
-            # sometimes there's a ": " in front of the name for some reason...
-            name = name.lstrip(': ')
-
-            duration = __get_length_str(data['durationSec'])
-            broadcasted = __get_age_str(datetime.strptime(data['published'], '%Y-%m-%dT%H:%M:%S'))
-            if data['expires']:
-                expires = ' - exits in %s' % areena_get_exit_str(data['expires'])
-            else:
-                expires = ''
-            play_count = __get_views(data['playCount'])
-            return '%s [%s - %s plays - %s%s]' % (name, duration, play_count, broadcasted, expires)
-
-        elif content_type == 'SERIES':
-            name = data['name']
-            episodes = data['episodeCountViewable']
-            latest_episode = __get_age_str(datetime.strptime(data['previousEpisode']['published'], '%Y-%m-%dT%H:%M:%S'))
-            return '%s [SERIES - %d episodes - latest episode: %s]' % (name, episodes, latest_episode)
-    except:
-        # We want to exit cleanly, so it falls back to default url handler
-        log.debug('Unhandled error in Areena.')
-        return
-
-
 def _handle_areena(url):
     """http://areena.yle.fi/*"""
+    def _parse_publication_events(data):
+        '''
+        Parses publication events from the data.
+        Returns:
+            - ScheduledTransmission
+            - OnDemandPublication
+            - first broadcast time (or if in the future, the start of availability on-demand) [datetime]
+            - the exit time of the on-demand [datetime]
+        '''
+        now = datetime.utcnow().replace(tzinfo=tzutc())
+
+        # Finds all publicationEvents from the data.
+        publicationEvents = data.get('publicationEvent', [])
+
+        # Finds the scheduled transmissions
+        ScheduledTransmission = [event for event in publicationEvents if event.get('type') == 'ScheduledTransmission']
+        if ScheduledTransmission:
+            # If transmissions are found, use the first one
+            ScheduledTransmission = ScheduledTransmission[0]
+
+        # Finds the on-demand transmissions
+        OnDemandPublication = [event for event in publicationEvents if event.get('temporalStatus') == 'currently' and event.get('type') == 'OnDemandPublication']
+        if OnDemandPublication:
+            # If transmissions are found, use the first one
+            OnDemandPublication = OnDemandPublication[0]
+
+        # Find the broadcast time of the transmission
+        # First, try to get the time when the on-demand was added to Areena.
+        broadcasted = parse_datetime(OnDemandPublication['startTime']) if OnDemandPublication and 'startTime' in OnDemandPublication else None
+        if broadcasted is None or broadcasted > now:
+            # If on-demand wasn't found, fall back to the scheduled transmission.
+            broadcasted = parse_datetime(ScheduledTransmission['startTime']) if ScheduledTransmission and 'startTime' in ScheduledTransmission else None
+
+        # Find the exit time of the on-demand publication
+        exits = None
+        if OnDemandPublication and 'endTime' in OnDemandPublication:
+            exits = parse_datetime(OnDemandPublication['endTime'])
+
+        return ScheduledTransmission, OnDemandPublication, broadcasted, exits
+
+    def get_duration(event):
+        ''' Parses duration of an event, returns integer value in seconds. '''
+        if not event:
+            return
+
+        duration = event.get('duration') or event.get('media', {}).get('duration')
+        if duration is None:
+            return
+
+        match = re.match(r'P((\d+)Y)?((\d+)D)?T?((\d+)H)?((\d+)M)?((\d+)S)?', duration)
+        if not match:
+            return
+
+        # Get match group values, defaulting to 0
+        match_groups = match.groups(0)
+
+        # Kind of ugly, but works...
+        secs = 0
+        secs += int(match_groups[1]) * 365 * 86400
+        secs += int(match_groups[3]) * 86400
+        secs += int(match_groups[5]) * 3600
+        secs += int(match_groups[7]) * 60
+        secs += int(match_groups[9])
+        return secs
+
+    def get_episode(identifier):
+        ''' Gets episode information from Areena '''
+        url = 'https://external.api.yle.fi/v1/programs/items/%s.json' % (identifier)
+        params = {
+            'app_id': config.get('areena', {}).get('app_id', 'cd556936'),
+            'app_key': config.get('areena', {}).get('app_key', '25a08bbaa8101cca1bf0d1879bb13012'),
+        }
+        r = bot.get_url(url=url, params=params)
+        if r.status_code != 200:
+            return
+
+        data = r.json().get('data', None)
+        if not data:
+            return
+
+        title = data.get('title', {}).get('fi', None)
+        if not title:
+            return
+
+        episode_number = data.get('episodeNumber', -100)
+        season_number = data.get('partOfSeason', {}).get('seasonNumber', -100)
+
+        if episode_number != -100 and season_number != -100:
+            title += ' - %dx%02d' % (season_number, episode_number)
+
+        promotionTitle = data.get('promotionTitle', {}).get('fi')
+        if promotionTitle:
+            title += ' - %s' % promotionTitle
+
+        duration = get_duration(data)
+
+        _, OnDemandPublication, broadcasted, exits = _parse_publication_events(data)
+
+        title_data = []
+        if duration:
+            title_data.append(__get_length_str(duration))
+        if broadcasted:
+            title_data.append(__get_age_str(broadcasted))
+        if exits and datetime.now(tz=tzutc()) + timedelta(days=2 * 365) > exits:
+            title_data.append('exits in %s' % __get_age_str(exits, use_fresh=False))
+        if not OnDemandPublication:
+            title_data.append('not available')
+        return '%s [%s]' % (title, ' - '.join(title_data))
+
+    def get_series(identifier):
+        ''' Gets series information from Areena '''
+        url = 'https://external.api.yle.fi/v1/programs/items.json'
+        params = {
+            'app_id': config.get('areena', {}).get('app_id', 'cd556936'),
+            'app_key': config.get('areena', {}).get('app_key', '25a08bbaa8101cca1bf0d1879bb13012'),
+            'series': identifier,
+            'order': 'publication.starttime:desc',
+            'availability': 'ondemand',
+            'type': 'program',
+            'limit': 100,
+        }
+        r = bot.get_url(url=url, params=params)
+        if r.status_code != 200:
+            return
+
+        data = r.json().get('data', None)
+        if not data:
+            return
+
+        latest_episode = data[0]
+        title = latest_episode.get('title', {}).get('fi', None)
+        if not title:
+            return
+
+        _, _, broadcasted, _ = _parse_publication_events(latest_episode)
+
+        title_data = ['SERIES']
+        if len(data) >= 100:
+            title_data.append('100+ episodes')
+        else:
+            title_data.append('%i episodes' % len(data))
+        if broadcasted:
+            title_data.append('latest episode: %s' % __get_age_str(broadcasted))
+
+        return '%s [%s]' % (title, ' - '.join(title_data))
+
+    # There's still no endpoint to fetch the currently playing shows via API :(
     if 'suora' in url:
         bs = __get_bs(url)
+        if not bs:
+            return
         container = bs.find('div', {'class': 'selected'})
         channel = container.find('h3').text
-        program = container.find('span', {'class': 'status-current'}).next_element.next_element
-        link = program.find('a').get('href', None)
-        if not program:
+        try:
+            program = container.find('li', {'class': 'current-broadcast'}).find('div', {'class': 'program-title'})
+        except AttributeError:
             return '%s (LIVE)' % (channel)
+
+        link = program.find('a').get('href', None)
         if not link:
             return '%s - %s (LIVE)' % (channel, program.text.strip())
         return '%s - %s <http://areena.yle.fi/%s> (LIVE)' % (channel, program.text.strip(), link.lstrip('/'))
 
-    # TODO: Whole rewrite, as this relies on the old system which will be brought down...
     try:
-        identifier = url.split('-')[1]
-    except IndexError:
+        identifier = url.split('/')[-1].split('?')[0]
+    except:
+        log.debug('Areena identifier could not be found.')
         return
 
-    tv = _handle_areena_v3('http://areena-v3.yle.fi/tv/%s' % (identifier))
-    if tv:
-        return tv
-    radio = _handle_areena_v3('http://areena-v3.yle.fi/radio/%s' % (identifier))
-    if radio:
-        return radio
+    # Try to get the episode (preferred) or series information from Areena
+    return get_episode(identifier) or get_series(identifier)
 
 
 def _handle_wikipedia(url):
@@ -765,9 +907,9 @@ def _handle_wikipedia(url):
             'format': 'json',
             'action': 'query',
             'prop': 'extracts',
-            # request 5 sentences, because Wikipedia seems to think that
-            # period is always indicative of end of sentence
-            'exsentences': 5,
+            # request everything before the first section, because requesting
+            # only a limited number of sentences breaks randomly
+            'exintro': '',
             'redirects': '',
             'titles': clean_page_name(url)
         }
@@ -779,7 +921,7 @@ def _handle_wikipedia(url):
 
         try:
             content = r.json()['query']['pages'].values()[0]['extract']
-            content = BeautifulSoup(content).get_text()
+            content = BeautifulSoup(content, 'html.parser').get_text()
         except KeyError:
             return
         return content
@@ -795,38 +937,33 @@ def _handle_wikipedia(url):
     content = re.sub(r'\(.*?\)', '', content)
     # Remove " , ", which might be left behind after cleaning up
     # the brackets
-    content = re.sub(' +,', ', ', content)
+    content = re.sub('\s+([,.])', '\\1 ', content)
     # Remove multiple spaces
-    content = re.sub(' +', ' ', content)
+    content = re.sub('\s+', ' ', content)
+    # Strip possible trailing whitespace
+    content = content.rstrip()
 
     # Define sentence break as something ending in a period and starting with a capital letter,
     # with a whitespace or newline in between
-    sentences = re.split('\.\s[A-ZÅÄÖ]', content)
+    sentences = re.split('\.\s(?=[A-ZÅÄÖ])', content)
     # Remove empty values from list.
     sentences = filter(None, sentences)
 
     if not sentences:
         return
 
-    first_sentence = sentences[0]
+    content = sentences[0]
+    # For example titles (Dr., etc.) confuse the splitter
+    if len(content) <= 20:
+        content = '. '.join(sentences[0:2])
     # After regex splitting, the dot shold be removed, add it.
-    if first_sentence[-1] != '.':
-        first_sentence += '.'
+    if not content.endswith('.'):
+        content += '.'
 
-    length_threshold = 450
-    if len(first_sentence) <= length_threshold:
-        return first_sentence
-
-    # go through the first sentence from threshold to end
-    # and find either a space or dot to cut to.
-    for i in range(length_threshold, len(first_sentence)):
-        char = first_sentence[i]
-        if char == ' ' or char == '.':
-            # if dot was found, the sentence probably ended, so no need to print "..."
-            if char == '.':
-                return first_sentence[:i + 1]
-            # if we ended up on a space, print "..."
-            return first_sentence[:i + 1] + '...'
+    if not content:
+        return
+    else:
+        return content
 
 
 def _handle_imgur(url):
@@ -919,33 +1056,29 @@ def _handle_liveleak(url):
     if not bs:
         return
     title = bs.find('span', 'section_title').text.strip()
-    info = str(bs.find('span', id='item_info_%s' % id))
-
-    added_by = '???'
-    tags = 'none'
-    date_added = '???'
-    views = '???'
+    info = bs.find('span', id='item_info_%s' % id)
+    info = info.renderContents().decode("iso8859-1")  # we need to render as unicode because if unicode_literals
 
     # need to do this kind of crap, as the data isn't contained by a span
     try:
-        added_by = BeautifulSoup(info.split('<strong>By:</strong>')[1].split('<br')[0]).find('a').text
+        added_by = BeautifulSoup(info.split(u'<strong>By:</strong>')[1].split('<br')[0], 'html.parser').find('a').text
     except:
-        pass
+        added_by = '???'
 
     try:
         date_added = info.split('</span>')[1].split('<span>')[0].strip()
     except:
-        pass
+        date_added = '???'
 
     try:
         views = __get_views(int(info.split('<strong>Views:</strong>')[1].split('|')[0].strip()))
     except:
-        pass
+        views = '???'
 
     try:
-        tags = BeautifulSoup(info.split('<strong>Tags:</strong>')[1].split('<br')[0]).text.strip()
+        tags = BeautifulSoup(info.split('<strong>Tags:</strong>')[1].split('<br')[0], 'html.parser').text.strip()
     except:
-        pass
+        tags = 'none'
 
     return '%s by %s [%s views - %s - tags: %s]' % (title, added_by, views, date_added, tags)
 
@@ -1080,7 +1213,7 @@ def _handle_dealextreme(url):
         return
 
     product = data['products'][0]
-    name = product['headLine']
+    name = product['shortHeadline']
     price = float(product['price'].replace(u'€', ''))
 
     if product['reviewCount'] > 0:
@@ -1096,7 +1229,7 @@ def _handle_dealextreme_www(url):
 
 
 def _handle_instagram(url):
-    """http*://instagram.com/p/*"""
+    """http*://*instagram.com/p/*"""
     from instagram.client import InstagramAPI
 
     CLIENT_ID = '879b81dc0ff74f179f5148ca5752e8ce'
@@ -1104,7 +1237,7 @@ def _handle_instagram(url):
     api = InstagramAPI(client_id=CLIENT_ID)
 
     # todo: instagr.am
-    m = re.search('instagram\.com/p/([^/]+)', url)
+    m = re.search(r"instagram\.com/p/([^/]+)", url)
     if not m:
         return
 
@@ -1113,8 +1246,6 @@ def _handle_instagram(url):
     r = bot.get_url("http://api.instagram.com/oembed?url=http://instagram.com/p/%s/" % shortcode)
 
     media = api.media(r.json()['media_id'])
-
-    print(media)
 
     # media type video/image?
     # age/date? -> media.created_time  # (datetime object)
@@ -1125,10 +1256,25 @@ def _handle_instagram(url):
     else:
         user = media.user.full_name
 
-    if media.caption:
-        return "%s: %s [%d likes, %d comments]" % (user, media.caption.text, media.like_count, media.comment_count)
+    if media.like_count or media.comment_count:
+        info = "["
+        if media.like_count:
+            info += "%d ♥" % media.like_count
+        if media.comment_count:
+            info += ", %d comments" % media.comment_count
+        info += "]"
     else:
-        return "%s [%d likes, %d comments]" % (user, media.like_count, media.comment_count)
+        info = ""
+
+    if media.caption:
+        if len(media.caption.text) > 145:
+            caption = "{0:.145}…".format(media.caption.text)
+        else:
+            caption = media.caption.text
+
+        return "%s: %s %s" % (user, caption, info)
+    else:
+        return "%s: %s" % (user, info)
 
 
 def fetch_nettiX(url, fields_to_fetch):
@@ -1150,7 +1296,7 @@ def fetch_nettiX(url, fields_to_fetch):
 
     # Find "main name" for the item
     try:
-        main = bs.find('div', {'class': 'fl'}).find('b').text.strip()
+        main = bs.find('div', {'class': 'head_left'}).find('b').text.strip()
     except AttributeError:
         # If not found, probably doesn't work -> fallback to default
         return
@@ -1161,25 +1307,27 @@ def fetch_nettiX(url, fields_to_fetch):
 
     try:
         # Try to find price for the item, if found -> add to fields
-        price = bs.find('div', {'class': 'pl10 mt10 lnht22'}).find('span').text.strip()
+        price = bs.find('div', {'class': 'pl10 mt15 lnht22'}).find('span').text.strip()
         if price:
             fields.append(price)
     except AttributeError:
         pass
 
     # All sites have the same basic structure, find the "data" table
-    ad_info = bs.find('div', {'class': 'ad_info'})
+    ad_info = bs.find('div', {'id': 'ad_info_list'})
     if ad_info:
         for f in ad_info.findAll('li'):
             # Get field name
-            field = f.text.split(':')[0]
+            field = f.find('div', {'class': 'ad_caption'})
+            # Field name ends in colon
+            field = field.text.strip()[:-1] if field else None
             # If the name was found and it's in fields_to_fetch
             if field and field in fields_to_fetch:
                 # Remove spans
                 # For example cars might have registeration date includet in a span
                 [s.extract() for s in f.findAll('span')]
-                # The "main data" is always in a "b" element
-                field_info = f.find('b').text.strip()
+                # Get field data
+                field_info = f.find('div', {'class': 'ad_details'}).text.strip()
                 # If the data was found and it's not "Ei ilmoitettu", add to fields
                 if field_info and field_info != 'Ei ilmoitettu':
                     fields.append(field_info)
@@ -1191,7 +1339,10 @@ def fetch_nettiX(url, fields_to_fetch):
 
 def _handle_nettiauto(url):
     """http*://*nettiauto.com/*/*/*"""
-    return fetch_nettiX(url, ['Vuosimalli', 'Mittarilukema', 'Moottori', 'Vaihteisto', 'Vetotapa'])
+    return fetch_nettiX(url, ['Vuosimallit', 'Mittarilukema', 'Moottori', 'Vaihteisto', 'Vetotapa'])
+
+
+# TODO: Update other nettiX handlers
 
 
 def _handle_nettivene(url):
@@ -1221,13 +1372,12 @@ def _handle_nettikone(url):
 
 def _handle_hitbox(url):
     """http*://*hitbox.tv/*"""
-
-   # Blog and Help subdomains aren't implemented in Angular JS and works fine with default handler
-    if re.match("http://(help|blog)\.hitbox\.tv/.*", url):
+    # Blog and Help subdomains aren't implemented in Angular JS and works fine with default handler
+    if re.match(r"http://(help|blog)\.hitbox\.tv/.*", url):
         return
 
     # Hitbox titles are populated by JavaScript so they return a useless "{{meta.title}}", don't show those
-    elif not re.match("http://(www\.)?hitbox\.tv/([A-Za-z0-9]+)$", url):
+    elif not re.match(r"http://(www\.)?hitbox\.tv/([A-Za-z0-9]+)$", url):
         return False
 
     # For actual stream pages, let's fetch information via the hitbox API
@@ -1261,7 +1411,6 @@ def _handle_hitbox(url):
         return False
 
 
-
 def _handle_google_play_music(url):
     """http*://play.google.com/music/*"""
     bs = __get_bs(url)
@@ -1283,15 +1432,15 @@ def _handle_steamstore(url):
 
     # https://wiki.teamfortress.com/wiki/User:RJackson/StorefrontAPI
     api_url = "http://store.steampowered.com/api/appdetails/"
-    app = re.match("http://store\.steampowered\.com\/app/(?P<id>\d+)", url)
-    params = { 'appids': app.group('id'), 'cc': 'fi' }
+    app = re.match(r"http://store\.steampowered\.com\/app/(?P<id>\d+)", url)
+    params = {'appids': app.group('id'), 'cc': 'fi'}
 
     r = bot.get_url(api_url, params=params)
     data = r.json()[app.group('id')]['data']
 
     name = data['name']
     if 'price_overview' in data:
-        price = "%.2fe" % (float(data['price_overview']['final'])/100)
+        price = "%.2fe" % (float(data['price_overview']['final']) / 100)
 
         if data['price_overview']['discount_percent'] != 0:
             price += " (-%s%%)" % data['price_overview']['discount_percent']
@@ -1299,6 +1448,77 @@ def _handle_steamstore(url):
         price = "Free to play"
 
     return "%s | %s" % (name, price)
+
+
+def _handle_pythonorg(url):
+    """http*://*python.org/*"""
+    title = __get_title_tag(url)
+    if title == 'Welcome to Python.org':
+        return False
+
+    return title.replace(' | Python.org', '')
+
+
+def _handle_discogs(url):
+    """http://*discogs.com/*"""
+
+    apiurl = 'https://api.discogs.com/'
+    headers = {'user-agent': 'pyfibot-urltitle'}
+
+    title_formats = {
+        'release': '{0[artists][0][name]} - {0[title]} - ({0[year]}) - {0[labels][0][catno]}',
+        'artist': '{0[name]}',
+        'label': '{0[name]}',
+        'master': '{0[artists][0][name]} - {0[title]} - ({0[year]})',
+    }
+
+    m = re.match(r'http:\/\/(?:www\.)?discogs\.com\/(?:([A-Za-z0-9-]+)\/)?(release|master|artist|label|item|seller|user)\/(\d+|[A-Za-z0-9_.-]+)', url)
+
+    if m:
+        m = m.groups()
+        if m[1] in title_formats:
+            endpoint = '%ss/%s' % (m[1], m[2])
+            data = bot.get_url('%s%s' % (apiurl, endpoint),
+                               headers=headers).json()
+
+            title = title_formats[m[1]].format(data)
+
+        elif m[1] in ['seller', 'user']:
+            endpoint = 'users/%s' % m[2]
+            data = bot.get_url('%s%s' % (apiurl, endpoint),
+                               headers=headers).json()
+
+            title = ['{0[name]}']
+
+            if data['num_for_sale'] > 0:
+                plural = 's' if data['num_for_sale'] > 1 else ''
+                title.append('{0[num_for_sale]} item%s for sale' % plural)
+
+            if data['releases_rated'] > 10:
+                title.append('Rating avg: {0[rating_avg]} (total {0[releases_rated]})')
+
+            title = ' - '.join(title).format(data)
+
+        elif m[0:2] == ['sell', 'item']:
+            endpoint = 'marketplace/listings/%s' % m[2]
+            data = bot.get_url('%s%s' % (apiurl, endpoint)).json()
+
+            for field in ('condition', 'sleeve_condition'):
+                if field in ['Generic', 'Not Graded', 'No Cover']:
+                    data[field] = field
+                else:
+                    m = re.match(r'(?:\w+ )+\(([A-Z]{1,2}[+-]?)( or M-)?\)',
+                                 data[field])
+                    data[field] = m.group(1)
+
+            fmt = ('{0[release][description]} [{0[price][value]}'
+                   '{0[price][currency]} - ships from {0[ships_from]} - '
+                   'Condition: {0[condition]}/{0[sleeve_condition]}]')
+
+            title = fmt.format(data)
+
+    if title:
+        return title
 
 
 def _handle_github(url):
@@ -1309,6 +1529,42 @@ def _handle_github(url):
 def _handle_gitio(url):
     """http*://git.io*"""
     return __get_title_tag(url)
+
+
+def _handle_gfycat(url):
+    """http*://*gfycat.com/*"""
+
+    api_url = "https://gfycat.com/cajax/get/%s"
+
+    m = re.match(r"https?://(?:\w+\.)?gfycat.com/([\w]+)(?:\.gif|\.webm|\.mp4)?", url)
+    if not m:
+        return
+
+    r = bot.get_url(api_url % m.group(1))
+    j = r.json()['gfyItem']
+
+    title = []
+    if j['title']:
+        title.append(j['title'])
+    elif j['redditId']:
+        try:
+            baseurl = "https://www.reddit.com/r/%s/comments/%s/%s/.json"
+            url = baseurl % (j['subreddit'], j['redditId'], j['redditIdText'])
+
+            r = bot.get_url(url)
+            data = r.json()[0]['data']['children'][0]['data']
+
+            title.append(data['title'])
+        except:
+            pass
+
+    if j['subreddit']:
+        title.append("(/r/%s)" % j['subreddit'])
+
+    title.append("%sx%s@%sfps" % (j['width'], j['height'], j['frameRate']))
+    title.append("%s views" % j['views'])
+
+    return " ".join(title)
 
 
 # IGNORED TITLES
@@ -1330,6 +1586,7 @@ def _handle_travis(url):
 def _handle_ubuntupaste(url):
     """http*://paste.ubuntu.com/*"""
     return False
+
 
 def _handle_poliisi(url):
     """http*://*poliisi.fi/*/tiedotteet/*"""

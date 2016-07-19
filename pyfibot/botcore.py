@@ -189,14 +189,14 @@ class PyFiBot(irc.IRCClient, CoreCommands):
     lineRate = 0.5
     hasQuit = False
 
-    CMDCHAR = "."
-
     # Rolling ping time average
     pingAve = 0.0
 
-    def __init__(self, network):
+    def __init__(self, config, network):
+        self.cmdchar = config.get('cmdchar', '.')
         self.network = network
         self.nickname = self.network.nickname
+        self.realname = self.network.realname or self.realname
         self.lineRate = self.network.linerate
         self.password = self.network.password
         # Text wrapper to clip overly long answers
@@ -318,20 +318,20 @@ class PyFiBot(irc.IRCClient, CoreCommands):
         nickl = len(lnick)
         if channel == lnick:
             # Turn private queries into a format we can understand
-            if not msg.startswith(self.CMDCHAR):
-                msg = self.CMDCHAR + msg
+            if not msg.startswith(self.cmdchar):
+                msg = self.cmdchar + msg
             elif lmsg.startswith(lnick):
-                msg = self.CMDCHAR + msg[nickl:].lstrip()
+                msg = self.cmdchar + msg[nickl:].lstrip()
             elif lmsg.startswith(lnick) and len(lmsg) > nickl and lmsg[nickl] in string.punctuation:
-                msg = self.CMDCHAR + msg[nickl + 1:].lstrip()
+                msg = self.cmdchar + msg[nickl + 1:].lstrip()
         else:
-            # Turn 'nick:' prefixes into self.CMDCHAR prefixes
+            # Turn 'nick:' prefixes into self.cmdchar prefixes
             if lmsg.startswith(lnick) and len(lmsg) > nickl and lmsg[nickl] in string.punctuation:
-                msg = self.CMDCHAR + msg[len(self.nickname) + 1:].lstrip()
+                msg = self.cmdchar + msg[len(self.nickname) + 1:].lstrip()
         reply = (channel == lnick) and user or channel
 
-        if msg.startswith(self.CMDCHAR):
-            cmnd = msg[len(self.CMDCHAR):]
+        if msg.startswith(self.cmdchar):
+            cmnd = msg[len(self.cmdchar):]
             self._command(user, reply, cmnd)
 
         # Run privmsg handlers
@@ -341,7 +341,7 @@ class PyFiBot(irc.IRCClient, CoreCommands):
         urls = pyfiurl.grab(msg)
         if urls:
             for url in urls:
-                self._runhandler("url", user, reply, url, msg)
+                self._runhandler("url", user, reply, url, self.factory.to_unicode(msg))
 
     def _runhandler(self, handler, *args, **kwargs):
         """Run a handler for an event"""
